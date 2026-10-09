@@ -1,0 +1,11 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Daryl Dimalanta
+"""Compatibility alias for the canonical agent-neutral command."""
+import os
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+target = Path(__file__).resolve().with_name("ynab-agent-skill")
+os.execv(str(target), [str(target), *sys.argv[1:]])

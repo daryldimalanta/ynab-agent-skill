@@ -1,0 +1,17 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Daryl Dimalanta
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+sys.dont_write_bytecode = True
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from budget_tools.cli import main  # noqa: E402
+
+
+raise SystemExit(main())

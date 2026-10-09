@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Daryl Dimalanta
+
+interface:
+  display_name: "ynab-agent-skill"
+  short_description: "Safely read and update YNAB transactions"
+  default_prompt: "Use $ynab-agent-skill to find an exact YNAB transaction and prepare a reviewable change."
