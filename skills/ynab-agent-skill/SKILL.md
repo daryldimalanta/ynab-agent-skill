@@ -114,6 +114,19 @@ In the proposal, set `transaction_id` explicitly to null and set expected accoun
 
 Application verifies the exact new-payee name and its API-assigned ID before approval, and retains that ID for recovery. A mismatch blocks approval. After an uncertain creation, reconcile the existing draft; never recreate either the payee or transaction speculatively.
 
+## Generic transaction updates and creation
+
+When you need to make a simple update or create a simple transaction without dealing with receipt components, proposals, or splits, use the generic commands:
+
+```text
+transactions draft-create --account ACCOUNT --date YYYY-MM-DD --outflow AMOUNT ...
+transactions draft-update TRANSACTION_ID --category CATEGORY --memo "Updated memo"
+```
+
+These generic commands skip the receipt-assessment conversion path. You can edit specific fields (such as `--memo`, `--clear-memo`, `--category`, or `--uncategorized`) for an existing transaction without altering its other properties.
+
+If an existing transaction has the wrong payee and you need to assign a new, non-existent merchant, you can use `--new-payee "CONFIRMED NAME"` with `draft-update` to explicitly rename the payee. Always review the drafted changes with the user before applying.
+
 ## Draft review and application
 
 All writes remain draft-first. Present the concrete draft's transaction, receipt evidence, parent memo, split categories, amounts, per-category memos, and approval intent. Apply only after the user explicitly approves that draft:

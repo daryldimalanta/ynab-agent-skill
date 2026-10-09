@@ -140,6 +140,18 @@ Drafting performs no API writes. On application, the transaction request supplie
 
 A known created ID is saved before readback. If the creation response is lost without an ID, stop for independent reconciliation; amount alone cannot establish identity.
 
+## Generic transaction creation and updates
+
+For updates or creations without a full receipt or proposal, use the generic commands:
+
+```sh
+ynab-agent-skill transactions draft-create --account ACCOUNT --date YYYY-MM-DD \
+  --outflow AMOUNT --payee PAYEE --category CATEGORY --memo "Optional memo"
+ynab-agent-skill transactions draft-update TRANSACTION_ID --category CATEGORY
+```
+
+These generic commands skip the receipt-assessment conversion path. You can edit specific fields (e.g., `--memo`, `--clear-memo`, `--category`, `--uncategorized`) for an existing transaction without affecting others. To fix an unknown merchant, use `--new-payee "CONFIRMED NAME"` to explicitly rename an existing transaction's payee. As always, changes must be reviewed as a local draft before being applied with `drafts apply`.
+
 ## Arithmetic, recovery, and limits
 
 The CLI tracks YNAB's 200-request rolling hour in private, token-specific state shared across local processes. It reserves capacity before sending, incorporates response usage headers, and automatically waits/retries confirmed HTTP 429 rejections for as many hours as needed. A valid `Retry-After` is honored; otherwise the cooldown is one hour plus a small margin. Wait notices go to stderr and sleeps are interruptible. Other applications using the same token may consume unobserved capacity, so an initial 429 remains possible. See [long-running work and recovery](skills/ynab-agent-skill/references/long-runs.md) for batch checkpoints and restart instructions.
