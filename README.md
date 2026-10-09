@@ -2,7 +2,11 @@
 
 An unofficial YNAB agent skill backed by a local API wrapper for reviewing receipts, categorizing transactions, and managing approved changes. Shared instructions are intended for Codex and Antigravity. The project, canonical command, and skill are named `ynab-agent-skill`. The legacy command `ynab-codex-skill` forwards to the same implementation.
 
-The current version supports exact transaction discovery, full single-record and bulk split reads (including posted recurring entries), receipt allocation validation, conversion of an unapproved unsplit transaction into category splits, explicitly requested new split transactions with confirmed missing payees, readback verification, guarded approval, and automatic persistent rate-limit handling. It is not affiliated with or supported by YNAB or OpenAI. `--version` derives from `budget_tools/__init__.py`.
+## ⚠️ Disclaimer
+
+**Use at your own risk.** This project is not affiliated with, endorsed, or officially supported by YNAB or OpenAI. Use of this OAuth App could introduce problems with your budget that YNAB official support channels will not be able to troubleshoot or fix. The software is provided "as is", without warranty of any kind. Please review all automated proposals carefully before authorizing any writes to your budget.
+
+The current version supports exact transaction discovery, full single-record and bulk split reads (including posted recurring entries), receipt allocation validation, conversion of an unapproved unsplit transaction into category splits, explicitly requested new split transactions with confirmed missing payees, readback verification, guarded approval, and automatic persistent rate-limit handling. `--version` derives from `budget_tools/__init__.py`.
 
 Offline regression results are recorded in [VALIDATION.md](VALIDATION.md). Receipt interpretation acceptance and a controlled live pilot remain pending. Python tests of authored proposals do not evaluate receipt images or an agent's interpretation.
 
