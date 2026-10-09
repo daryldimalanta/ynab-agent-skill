@@ -62,7 +62,7 @@ def _default_transport(
 
 
 class YnabClient:
-    """Fixed-origin HTTP client; draft authorization and recovery belong to the CLI.
+    """Fixed-origin HTTP client; authorization belongs to the workflow modules.
 
     Tests can inject a transport to exercise request serialization without a
     network connection. Error details supplied by the API can contain private data.
@@ -211,6 +211,21 @@ class YnabClient:
 
     def get_payees(self, plan_id: str) -> list[dict[str, Any]]:
         return self.request("GET", f"/plans/{_safe_id(plan_id)}/payees")["data"]["payees"]
+
+    def get_months(self, plan_id: str) -> list[dict[str, Any]]:
+        return self.request("GET", f"/plans/{_safe_id(plan_id)}/months")["data"]["months"]
+
+    def get_month(self, plan_id: str, month: str) -> dict[str, Any]:
+        return self.request(
+            "GET", f"/plans/{_safe_id(plan_id)}/months/{_safe_id(month)}"
+        )["data"]["month"]
+
+    def update_month_category(self, plan_id: str, month: str, category_id: str,
+                              budgeted: int) -> dict[str, Any]:
+        return self.request(
+            "PATCH", f"/plans/{_safe_id(plan_id)}/months/{_safe_id(month)}/categories/{_safe_id(category_id)}",
+            body={"category": {"budgeted": budgeted}},
+        )
 
     def get_transactions(
         self,

@@ -1,6 +1,27 @@
 # Validation
 
-## Current source: agent-neutral naming — 2026-10-06
+## Current source: monthly budget planning — 2026-10-08
+
+Version `0.7.0`; Python `3.9.6` on macOS `26.7.1` / arm64. Monthly reads report assigned, activity, authoritative available balances, Ready to Assign and currency metadata. Single-category assignment drafts use the existing seal format with confirmation, expiry, local draft/plan locks, stale-state and rate-wait revalidation, durable checkpoints and GET-only reconciliation. Existing transaction behavior and private-state identities are retained.
+
+| Check | Observed result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest discover -s tests -q` | 205 tests passed; exit 0 |
+| `PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest discover -s validation -q` | 50 tests passed; exit 0 |
+| `python3 -m validation.audit_mutation_checks` | Passing 118-test control; 7/7 faults detected; exit 0 |
+| `python3 -m validation.audit_new_payee_checks` | Passing 33-test control; 4/4 faults detected; exit 0 |
+| `python3 -m validation.audit_transaction_read_checks` | Passing 20-test control; 10/10 faults detected; exit 0 |
+| `python3 -m validation.audit_budget_planning_checks` | Passing 31-test control; 7/7 faults exercised and detected by assertions, zero errors; exit 0 |
+| Skill Creator `quick_validate.py skills/ynab-agent-skill` | Passed; validation-only PyYAML dependency |
+| Canonical/legacy version, budget command help, Python syntax, relative documentation links and diff whitespace | Passed |
+
+The 31 new budget tests use fictional API responses through the real HTTP serializer and CLI. Existing regression assertions were retained; the mutation-gate tests now also exercise the new runner. Budget tests cover monthly versus current-category figures, rollover, signs and precision, explicit confirmation, seals, changed state, locks/checkpoints, expiry, delayed writes, readback failures and recovery without replay. All 255 ordinary tests passed. These checks do not prove absence of every possible regression.
+
+Tests used isolated local state with a Python guard blocking network, credential and unrelated private-file access. Installer tests ran the reviewed local script only against synthetic temporary homes. All four mutation diagnostics used the same guard. No live account or financial operation was performed.
+
+Source SHA-256: `4023360937acf3e1b9b760665b9842318a329387006b8deae180fcc891281b2b`. This identifies the final distribution source using the procedure below, including new source files. Subsequent changes to this report are reporting only. Runtime smoke checks used help/version only. Native host discovery, model interpretation and live budget behavior were not tested; the [budget acceptance cases](validation/BUDGET_ACCEPTANCE_CASES.md) are an unexecuted evaluation plan. Atomic multi-category transfers and target editing are not implemented.
+
+## Historical source: agent-neutral naming — 2026-10-06
 
 Version `0.6.1`; Python `3.9.6` on macOS `26.7.1` / arm64. Project, canonical command and skill identity are `ynab-agent-skill`. The legacy command is a forwarding alias. Financial algorithms, credential labels, private-state paths, review seals and schemas are unchanged; runtime edits are naming strings and the package version.
 
@@ -33,8 +54,8 @@ The 217 ordinary test cases retain their safety assertions. Python syntax, relat
 
 Source identity: SHA-256 `6ac0cbd6feb149a5500211350aeecc7125d7d6bcdd562cdb4ce683a911992e9c`. To reproduce it, enumerate every distribution file except `VALIDATION.md` and `PRIVACY_REVIEW.md`; form sorted `[relative_posix_path, file_sha256]` pairs; encode their JSON with separators `(',', ':')` and no trailing newline; hash those UTF-8 bytes. These two report files are excluded to avoid circular evidence hashes. Their final changes are reporting only.
 
-## Limits
+## Limits of historical results
 
-These results validate the exercised offline behavior and targeted fault sensitivity. They do not prove model receipt interpretation, live API behavior, complete coverage, or production readiness. The [interpretation acceptance cases](validation/RECEIPT_ACCEPTANCE_CASES.md) and live pilot were not run. No installed-skill update was performed. Test controls must pass before mutation failures are counted as detection; setup/import errors do not qualify.
+These results validate the exercised offline behavior and targeted fault sensitivity. They do not prove model receipt interpretation, live API behavior, complete coverage, or production readiness. The [interpretation acceptance cases](validation/RECEIPT_ACCEPTANCE_CASES.md) and live pilot were not run. No installed-skill update was performed for those historical snapshots. Test controls must pass before mutation failures are counted as detection; setup/import errors do not qualify.
 
 See [README.md](README.md#offline-verification) for reusable commands and [PRIVACY_REVIEW.md](PRIVACY_REVIEW.md) for distribution boundaries. Only synthetic source evidence belongs in this report.

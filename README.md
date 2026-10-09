@@ -1,6 +1,6 @@
 # ynab-agent-skill
 
-An unofficial YNAB agent skill backed by a local API wrapper for reviewing receipts, categorizing transactions, and managing approved changes. Shared instructions are intended for Codex and Antigravity. The project, canonical command, and skill are named `ynab-agent-skill`. The legacy command `ynab-codex-skill` forwards to the same implementation.
+An unofficial YNAB agent skill backed by a local API wrapper for reviewing monthly budgets and remaining balances, adjusting approved category assignments, reviewing receipts, and managing transactions. Shared instructions are intended for Codex and Antigravity. The project, canonical command, and skill are named `ynab-agent-skill`. The legacy command `ynab-codex-skill` forwards to the same implementation.
 
 ## ⚠️ Disclaimer
 
@@ -84,6 +84,27 @@ ynab-agent-skill transactions list --since 2026-01-01 --until 2026-01-31 --inclu
 
 Date/account/type/amount filters still select parent transactions. `--limit` limits parents, not their split lines; omit it for a complete report. For category-level totals, use the matching split amounts rather than the entire parent amount, and never add both parent and child amounts. Retain both memo levels as evidence. Reimbursement/gift interpretation is the reporting agent's responsibility, not an automatic CLI classification or proof of an outstanding balance. See the skill's [reporting guidance](skills/ynab-agent-skill/SKILL.md#read-only-allocation-reports).
 
+## Monthly budget planning
+
+Version 0.7.0 adds monthly budget reads and reviewed category assignments. After completing the setup and selecting the exact plan, prefix these examples with `ynab-agent-skill`:
+
+```text
+budgets months
+budgets get 2001-02
+budgets get 2001-02 --category "Example Group A: Example Category A"
+budgets draft-assign 2001-02 --category "Example Group A: Example Category A" --assigned 81.25
+budgets draft-assign 2001-02 --category CATEGORY_ID --increase 17.25
+budgets draft-assign 2001-02 --category CATEGORY_ID --decrease 17.25
+```
+
+Dates, names, and amounts above are fictional. Specify `YYYY-MM` or `YYYY-MM-01`, including for future months exposed by YNAB. Read output separates Assigned, signed Activity, Available, and whole-month Ready to Assign. Available comes from YNAB and includes rollover; it is not necessarily Assigned plus Activity. Negative availability is flagged as overspent. Amounts include integer milliunits and exact decimal strings for both programmatic use and readable agent reports. A category filter does not narrow the whole-month totals.
+
+`--assigned` sets a new total, whereas `--increase` or `--decrease` calculates a total from the current assignment. Drafting makes no API write. Review the exact plan/month/category, before/after amounts, difference, estimated availability, and Ready to Assign impact, including negative estimates. Only after explicit approval use the returned `drafts apply ID --confirm ID` command. Application rechecks current state and reads back the final assignment and balances. Changed state requires a new review; uncertain writes must be reconciled without replay.
+
+Budget drafts use the existing sealed private draft storage and 24-hour expiry. Budget operations have draft and plan locks, and rate-limit retries revalidate state and age. `drafts reconcile ID` only reads YNAB; `drafts resume` is unsupported for budget assignments. Single-category assignments are supported, including Credit Card Payment categories. Target editing, plan/category creation, automatic multi-category allocation and atomic transfers between categories are outside this release. For the full review and recovery contract, see [budget planning guidance](skills/ynab-agent-skill/references/budget-planning.md).
+
+The API contracts are documented in YNAB's official [monthly endpoints](https://github.com/ynab/ynab-sdk-python/blob/main/docs/MonthsApi.md) and [category endpoints](https://github.com/ynab/ynab-sdk-python/blob/main/docs/CategoriesApi.md). No live financial operation is authorized by these examples.
+
 ## Receipt workflow
 
 Transaction IDs are opaque identifiers. Preserve the complete ID returned by YNAB, including any underscore/date suffix on a posted recurring transaction. Do not strip a suffix, infer scheduled status from it, or substitute a recurring template ID after a failed lookup. The transaction's `date` field, which may have been edited, supplies its date. Future scheduled templates use a separate API resource that this CLI does not expose.
@@ -128,7 +149,7 @@ Delayed mutations revalidate the target and check draft expiry before sending. A
 - Exact decimal strings, currency precision, 500-character parent/line memos, category totals, and required evidence are checked locally. Omitted/null parent memo preserves it; an empty string clears it.
 - Discounts, tax, tips, and returns may be signed components. Their net, supplied tender, and allocations must each match the receipt total. Arithmetic cannot prove category or tax attribution; unresolved evidence blocks drafting.
 - Ordinary outflows and pure refunds are supported. Allocation magnitudes inherit the transaction's sign. Mixed-sign category allocations and multiple tenders are blocked. Do not omit known payments to pass validation.
-- Hidden/deleted/internal categories and groups, Credit Card Payment categories, receipt transfers, and pending bank transactions absent from the API are unsupported. Deletion is not exposed.
+- Hidden/deleted/internal categories and groups, Credit Card Payment transaction categorization, receipt transfers, and pending bank transactions absent from the API are unsupported. Active Credit Card Payment budget assignments are supported. Deletion is not exposed.
 - Apply and resume enforce a 24-hour expiry. Reviewed fields are sealed against accidental changes, not a malicious same-user process replacing both data and checksum.
 - `drafts reconcile ID` only reads API state. `drafts resume ID --confirm ID` can send remaining approval when the existing draft is valid and still authorized; it does not repeat conversion or creation.
 - Old unsealed drafts need reassessment. Never automatically replace an uncertain creation or edit private JSON to bypass recovery checks.
@@ -145,9 +166,10 @@ PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest discover -s validation -q
 PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m validation.audit_mutation_checks
 PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m validation.audit_new_payee_checks
 PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m validation.audit_transaction_read_checks
+PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m validation.audit_budget_planning_checks
 ```
 
-Fixtures are synthetic. Both test directories must be run. The general mutation diagnostic injects seven faults in memory; the new-payee diagnostic injects four, and the transaction-read diagnostic injects ten. All require a passing unmodified control and exit nonzero for missed faults or test errors. Assertion failures from an exercised fault are detection evidence, not normal regressions; loader/fixture errors do not count. The [acceptance checklist](validation/RECEIPT_ACCEPTANCE_CASES.md) remains unexecuted as a model evaluation. No live integration test is run automatically.
+Fixtures are synthetic. Both test directories must be run. The general mutation diagnostic injects seven faults in memory; the new-payee diagnostic injects four, the transaction-read diagnostic injects ten, and the budget-planning diagnostic injects seven. All require a passing unmodified control and exit nonzero for missed faults or test errors. Assertion failures from an exercised fault are detection evidence, not normal regressions; loader/fixture errors do not count. The [receipt acceptance checklist](validation/RECEIPT_ACCEPTANCE_CASES.md) and [budget acceptance checklist](validation/BUDGET_ACCEPTANCE_CASES.md) are separate from automated tests. No live integration test is run automatically.
 
 ## Distribution status
 

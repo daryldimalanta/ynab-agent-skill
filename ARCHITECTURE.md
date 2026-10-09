@@ -1,6 +1,6 @@
 # Project structure and architecture
 
-`ynab-agent-skill` has two cooperating parts: an agent skill that describes the receipt-review workflow, and a local Python command that validates proposals and performs controlled YNAB operations. The command runs on demand; there is no background service, database server, bundled model, or OCR engine.
+`ynab-agent-skill` has two cooperating parts: an agent skill that describes receipt review and monthly budget planning, and a local Python command that validates proposals and performs controlled YNAB operations. The command runs on demand; there is no background service, database server, bundled model, or OCR engine.
 
 This guide maps the current implementation (versioned in `budget_tools/__init__.py`). Start with [README.md](README.md) for installation and everyday use, [the proposal reference](skills/ynab-agent-skill/references/proposal.md) for input JSON, and [VALIDATION.md](VALIDATION.md) for observed test results and remaining work.
 
@@ -14,6 +14,7 @@ ynab-agent-skill/
 ├── budget_tools/                    Internal Python package
 │   ├── __init__.py                  Package version
 │   ├── cli.py                       Commands and workflow orchestration
+│   ├── planning.py                  Monthly reads and guarded budget assignments
 │   ├── receipts.py                  Receipt proposal validation and normalization
 │   ├── api.py                       HTTP transport and YNAB resource methods
 │   ├── rate_limit.py                Persistent request accounting and waits
@@ -23,6 +24,7 @@ ynab-agent-skill/
 │   ├── SKILL.md                     Shared agent instructions
 │   ├── LICENSE.txt                  MIT notice for standalone skill distribution
 │   ├── references/proposal.md       Version-1 proposal schema and example
+│   ├── references/budget-planning.md Monthly read, review, and recovery guidance
 │   ├── references/memos.md          Memo composition guidance
 │   ├── references/long-runs.md      Batch checkpoints and recovery
 │   └── agents/openai.yaml           Optional Codex display metadata and example prompt
@@ -55,6 +57,9 @@ flowchart TD
     Proposal --> State[state.py: private file access]
     CLI --> State
     CLI --> Receipts[receipts.py: proposal validation]
+    CLI --> Planning[planning.py: budget review and execution]
+    Planning --> State
+    Planning --> API
     CLI --> Keychain[keychain.py: token lookup]
     CLI --> API[api.py: YnabClient]
     API --> YNAB[Fixed YNAB API origin]
@@ -70,7 +75,7 @@ These arrows show responsibility and data flow. `SKILL.md` is an instruction fil
 
 ### Command orchestration: `cli.py`
 
-[`budget_tools/cli.py`](budget_tools/cli.py) is the largest module. It contains both command dispatch and the workflow logic; there is no separate service layer hidden elsewhere.
+[`budget_tools/cli.py`](budget_tools/cli.py) is the largest module. It contains command dispatch and transaction workflow logic. Budget workflow policy is in `planning.py`; the CLI routes budget drafts there before entering transaction-specific lock and recovery paths.
 
 | Area | Functions to start with | Responsibility |
 | --- | --- | --- |
@@ -85,6 +90,18 @@ These arrows show responsibility and data flow. `SKILL.md` is an instruction fil
 
 Transaction reads separate transport from presentation. `_transaction_query` obtains scoped, non-deleted parent records; `cmd_transactions` applies exact signed-amount filters and display limits. Default list and match use `_transaction_summary`. Opt-in `transactions list --include-splits` and single-record `get` share `_transaction_detail`, preserving parent context and live child categories, signed amounts, and memos. Bulk formatting never calls single-record endpoints. This change adds no persistence format, schedule resolver, reporting classifier, or write workflow; existing seals, expiry, locks, verification, and recovery stay in their current layers. `tests/test_transaction_reads.py` exercises these read contracts and suffixed-ID apply/recovery through the real client with synthetic transport.
 
+### Budget planning: `planning.py`
+
+[`budget_tools/planning.py`](budget_tools/planning.py) owns monthly presentation and the `budget_assign` workflow. `read_budget()` joins category identity/group metadata with amounts from the explicitly requested month; current-month amounts returned by `/categories` never replace historical figures. Output retains exact decimal strings and integer milliunits. Available is the API balance, including rollover; whole-month Ready to Assign remains separate. The CLI performs decimal parsing using the existing exact-money helper.
+
+`create_draft()` records one month's category assignment as an absolute milliunit total, even for increase/decrease requests. The existing review seal already covers `proposal` (month/category ID), `payload` (new `budgeted` total), `before_detail` (monthly totals, category snapshot and currency configuration), summary and changes. No change to the review-digest fields or existing transaction draft formats is needed. Draft output exposes before/after amounts and estimated consequences, not a claim of final balances.
+
+`execute()` is the supported budget write entry point for both CLI and library callers. It verifies terms, reloads the sealed draft under a draft lock, obtains a plan-scoped budget lock, checks confirmation/status/expiry and selected plan, then compares fresh monthly state with the reviewed snapshot. The real client's write guard repeats validation after capacity waits or confirmed 429 rejections and persists `applying` before every send. It PATCHes only `category.budgeted` on the explicit month/category path. A definite rejection is failed; a confirmed 429 is pending; uncertain transport/server outcomes remain uncertain and cannot be reapplied. Acknowledged writes become verification-pending before fresh GETs verify category identity/status and the requested assignment.
+
+Successful readback records `applied`; a mismatch records `verification_failed`. Interrupted or failed readback retains a non-replayable state. `drafts reconcile` uses the stored target and GETs only; it may establish that the desired state currently exists, not which client caused it. Budget drafts do not support `resume`. Readback shows current Available and Ready to Assign rather than assuming estimates became actual balances. Budget locks coordinate cooperating budget writers in the same state root, but not transaction writers, the YNAB UI, or other API clients. This is a single-category operation, not an atomic multi-category transfer or cross-client compare-and-set.
+
+`tests/test_budget_planning.py` uses a synthetic endpoint model with the actual API serializer and CLI. The focused mutation runner deliberately breaks rollover handling, stale-state checks, expiry, sealing, readback, outgoing amounts and category eligibility. Model-level scenarios are separately listed in [budget acceptance cases](validation/BUDGET_ACCEPTANCE_CASES.md).
+
 ### Receipt rules: `receipts.py`
 
 [`budget_tools/receipts.py`](budget_tools/receipts.py) owns `validate_receipt_proposal()` and exact decimal-to-milliunit conversion. It checks proposal version, selected plan/transaction, expected account/date/amount, receipt totals, allocation totals, currency precision, memos, evidence fields, unresolved facts, and supported tender count.
@@ -95,7 +112,7 @@ This module does not directly open files or make HTTP requests. It receives the 
 
 ### Network boundary: `api.py`
 
-[`budget_tools/api.py`](budget_tools/api.py) provides `YnabClient`. Resource methods build paths for users, plans, accounts, settings, categories, payees, and transactions. `request()` adds authentication and the user agent, encodes JSON, invokes the transport, decodes the response, and converts transport/API failures into `ApiError`.
+[`budget_tools/api.py`](budget_tools/api.py) provides `YnabClient`. Resource methods build paths for users, plans, accounts, settings, categories, payees, transactions, and budget months. Budget assignments use PATCH with a `category` JSON wrapper containing only `budgeted`. `request()` adds authentication and the user agent, encodes JSON, invokes the transport, decodes the response, and converts transport/API failures into `ApiError`.
 
 The origin is fixed to `https://api.ynab.com/v1`. Resource IDs are checked before path construction, and the default urllib transport rejects authenticated redirects. `_safe_id` accepts nonempty ASCII letters, digits, hyphens and underscores, preserving posted recurring transaction IDs verbatim. It rejects separators, query/fragment delimiters, percent escapes, dot segments and non-string inputs. ID syntax never selects a scheduled endpoint or determines the transaction date. Creation uses POST and updates use PUT, with a `transaction` JSON wrapper. The client has no deletion method. Only confirmed HTTP 429 rejections are automatically retried; uncertain writes retain the existing recovery boundary.
 
@@ -126,8 +143,10 @@ For a confirmed missing payee, `draft-receipt-create --new-payee` seals the exac
 | `auth status`, `plans list`, `plans use`, `accounts`, `categories`, `payees` | API reads | May initialize private directories; `plans use` saves the selection |
 | `transactions list`, `match`, `get`, `assess-receipt` | API reads | Read configuration/proposal as needed; may initialize private directories |
 | `transactions draft-*` | API reads, no transaction write | Save a sealed local draft |
+| `budgets months`, `budgets get` | API reads | Read configuration and rate-limit state |
+| `budgets draft-assign` | API reads, no budget write | Save a sealed monthly assignment draft |
 | `drafts list`, `show` | None | Read private drafts; listing may initialize private directories |
-| `drafts apply` | May create/update/approve a transaction | Persist progress, verification results, and audit records |
+| `drafts apply` | May create/update/approve a transaction or set a monthly category assignment | Persist progress, verification results, and audit records |
 | `drafts reconcile` | API reads only | Update recovery state and, when finalized, local audit records |
 | `drafts resume` | May send remaining receipt approval | Persist approval progress and verification |
 
@@ -182,7 +201,7 @@ Draft `status` expresses whether the operation is pending, in progress, uncertai
 | Verification mismatch | `applied_with_warning` / a verification-failure stage | A write may have occurred, but the intended result is not proven |
 | Verified completion | `applied` / `verified_categorization` or `verified_approval` | Requested receipt outcome verified |
 
-The table is a guide, not an exhaustive state-machine specification; the apply/reconcile functions contain the full branches. Reconciliation requires a known transaction ID and never guesses one from amount alone. It can establish completion or return a receipt draft to `approval_pending`. Resume sends only the remaining approval and enforces the same 24-hour expiry. It does not replay creation or conversion.
+The table is a guide to transaction workflows, not an exhaustive state-machine specification; the apply/reconcile functions contain the full branches. Transaction reconciliation requires a known transaction ID and never guesses one from amount alone. It can establish completion or return a receipt draft to `approval_pending`. Resume sends only the remaining receipt approval and enforces the same 24-hour expiry. Budget reconciliation instead uses its sealed month/category target, with no resume operation; its states are described in the budget planning section above.
 
 `cmd_drafts()` locks the draft and, for an existing known receipt/update target, the plan/transaction pair. That serializes local callers, including different drafts aimed at one transaction. A new creation has no target ID to lock before its first write, and these locks cannot coordinate with YNAB's UI or other API clients.
 
@@ -214,19 +233,22 @@ This tree describes the implementation; it is not a sample of anyone's private s
 | [validation/test_repair_safety.py](validation/test_repair_safety.py) | Filesystem protections, review seals, write failures, uncertain writes, and cross-process transaction locking |
 | [tests/test_transaction_reads.py](tests/test_transaction_reads.py) | Opaque posted IDs, path rejection, default/bulk read contracts, exact split context, and suffixed-ID authorization/recovery |
 | [tests/test_mutation_gates.py](tests/test_mutation_gates.py) | Mutation runners reject missed faults, test errors, and empty/failing controls |
+| [tests/test_budget_planning.py](tests/test_budget_planning.py) | Monthly amounts, exact assignments, explicit review, stale-state/rate-wait checks, seals, locks and read-only recovery |
 | [validation/audit_mutation_checks.py](validation/audit_mutation_checks.py) | Seven deliberate in-memory workflow/transport faults |
 | [validation/audit_new_payee_checks.py](validation/audit_new_payee_checks.py) | Four deliberate missing-payee faults |
 | [validation/audit_transaction_read_checks.py](validation/audit_transaction_read_checks.py) | Ten deliberate ID/path, split-context, default-contract and request-count faults |
+| [validation/audit_budget_planning_checks.py](validation/audit_budget_planning_checks.py) | Seven deliberate budget read and write-safety faults |
 
 Some tests share fixtures across both directories: `FakeClient` lives in `tests/test_budget_tools.py`, and `OfflineCase` / `ReviewClient` live in `validation/test_post_implementation_safety.py`. Keep both directories available when running tests. `validation` works as a Python namespace package without an `__init__.py`.
 
-Run both unittest discovery commands and the three mutation diagnostics in [README.md](README.md#offline-verification). Running only one directory omits coverage. Dated results are in [VALIDATION.md](VALIDATION.md); they do not mean the receipt interpretation cases or live pilot have passed. The [acceptance checklist](validation/RECEIPT_ACCEPTANCE_CASES.md) is a future evaluation plan, not an executable test suite.
+Run both unittest discovery commands and all four mutation diagnostics in [README.md](README.md#offline-verification). Running only one directory omits coverage. Dated results are in [VALIDATION.md](VALIDATION.md); they do not mean model interpretation cases or live pilots have passed. The receipt and budget acceptance checklists are evaluation plans, not executable test suites.
 
 ## Where to make a change
 
 | Intended change | Start here | Follow through |
 | --- | --- | --- |
 | Add/change a command | `cli.py`: `build_parser`, dispatch, relevant handler | Help text, README, and command behavior tests |
+| Change budget reads, assignments or recovery | `planning.py`, budget dispatch in `cli.py` | Monthly API contracts, budget tests, mutation checks, and budget skill reference |
 | Change receipt fields or arithmetic | `receipts.py` | Proposal reference, CLI normalization/payload use, receipt tests |
 | Change matching or category resolution | `cli.py`: query/resolver helpers | API-contract tests with independent filters and exact expected results |
 | Change an HTTP request or response assumption | `api.py` | Verify the relevant official contract; exercise the real client against the offline transport |

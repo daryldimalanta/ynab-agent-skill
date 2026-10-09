@@ -1,7 +1,7 @@
 ---
 name: ynab-agent-skill
 license: MIT
-description: "Use the local ynab-agent-skill command to find, read, create, categorize, split, or update transactions in the user's own YNAB plan. Apply for YNAB API, receipt categorization, and transaction-management requests."
+description: "Use the local ynab-agent-skill command to read monthly budgets and remaining category balances, prepare approved budget assignments, and find, create, categorize, split, or update transactions in the user's own YNAB plan. Apply for budget planning, receipts, and transaction management."
 ---
 
 # ynab-agent-skill
@@ -24,13 +24,13 @@ Use the CLI instead of direct API, SDK, or Keychain calls. Never request, reveal
 
 Version 0.4.0 automatically accounts for the 200-request rolling hour across local commands sharing a token, waits for capacity, and retries confirmed HTTP 429 rejections. Let a waiting command continue, even across multiple hours; rate limiting alone needs no new human approval. Use the execution tool's running-session handle to check completion instead of starting another copy or repeatedly making API probes. Read [long-running work and recovery](references/long-runs.md) before a large batch or resuming an interrupted chat.
 
-The CLI rechecks a delayed write against current transaction state and draft age. Existing approval of an unchanged, unexpired draft remains valid during rate-limit waits. Authentication failure, changed evidence/transactions, expired drafts, and uncertain writes are separate conditions; automatic rate-limit retries do not authorize bypassing them.
+The CLI rechecks a delayed write against current transaction or budget state and draft age. Existing approval of an unchanged, unexpired draft remains valid during rate-limit waits. Authentication failure, changed evidence, expired drafts, and uncertain writes are separate conditions; automatic rate-limit retries do not authorize bypassing them.
 
 ## Establish context
 
 1. Run `terms status`. If the notice is not acknowledged, tell the user to run `terms acknowledge` interactively. Do not acknowledge it for them.
 2. Run `auth status` before relying on API access. If Keychain lookup fails in a restricted shell, follow the recovery guidance below.
-3. A transaction operation requires one selected plan. If none is selected, run `plans list`. If multiple plans exist, ask the user to identify the exact plan before `plans use PLAN_ID`.
+3. A transaction or budget operation requires one selected plan. If none is selected, run `plans list`. If multiple plans exist, ask the user to identify the exact plan before `plans use PLAN_ID`.
 
 ### Restricted-shell Keychain recovery
 
@@ -43,6 +43,12 @@ Success is exit status 0 with `authenticated: true`. Only a successful retry est
 If escalation is unavailable or denied, stop dependent API work and give the user the quoted absolute executable path followed by `auth status` to run in their normal local terminal. Ask only for the success/failure result, never the token or a Keychain dump. If the retry still fails to read Keychain, report unresolved credential access and direct the user to verify the existing service/account item in Keychain Access. An actual YNAB HTTP authentication rejection is a separate credential problem; do not keep retrying it as a sandbox failure.
 
 Never use raw `security` commands, token exports, temporary token files, or direct API calls as a workaround. After an interrupted or uncertain write, restore access and use `drafts reconcile DRAFT_ID`; a successful auth check is not permission to replay the write.
+
+## Monthly budget planning
+
+Requires CLI 0.7.0 or later. Read [budget planning](references/budget-planning.md) for monthly balances, assignment drafts, review fields, and recovery. Use `budgets months` to discover months and `budgets get YYYY-MM` to read a particular month. Show Assigned, Activity, and Available separately; use the API's Available value, which can include rollover. Ready to Assign is separate from category availability.
+
+Budget changes use `budgets draft-assign`, then the same explicit draft-review and `drafts apply` approval boundary. A request to inspect budgets or suggest a plan does not authorize assigning money. Ask for the month or intended amount when ambiguous. Do not infer personal category defaults or spending habits from repository examples.
 
 ## Read-only allocation reports
 

@@ -21,6 +21,7 @@ from typing import Any, Sequence
 from pathlib import Path
 
 from budget_tools import __version__
+from budget_tools import planning
 from budget_tools.api import ApiError, YnabClient
 from budget_tools.keychain import KeychainError, read_access_token
 from budget_tools.receipts import MAX_AMOUNT, ReceiptProposalError, validate_receipt_proposal
@@ -497,6 +498,10 @@ def _draft_public(draft: dict[str, Any]) -> dict[str, Any]:
         "changes": draft.get("changes"),
         "apply_command": f"ynab-agent-skill drafts apply {draft.get('id')} --confirm {draft.get('id')}",
     }
+    if draft.get("operation") == "budget_assign":
+        result["budget_review"] = draft.get("proposal")
+        result["verification"] = draft.get("verification")
+        result["readback"] = draft.get("readback")
     if draft.get("workflow") == "receipt_split":
         proposal = draft.get("proposal", {})
         result["receipt_review"] = {
@@ -614,6 +619,31 @@ def cmd_categories(args: argparse.Namespace, store: StateStore) -> None:
             if not item.get("deleted")
         ]
     )
+
+
+def cmd_budgets(args: argparse.Namespace, store: StateStore) -> None:
+    plan_id = _selected_plan(store)
+    if args.budgets_command == "months":
+        client = _client()
+        months = client.get_months(plan_id)
+        _json_output({"plan_id": plan_id, "currency_format": client.get_plan_settings(plan_id)["currency_format"],
+                      "months": [planning.month_summary(m) for m in months
+                                                    if not m.get("deleted")]})
+        return
+    month = planning.month_key(args.month)
+    if args.budgets_command == "get":
+        _json_output(planning.read_budget(_client(), plan_id, month, args.category))
+        return
+    if args.assigned is not None:
+        negative = args.assigned.startswith("-")
+        amount = _milliunits(args.assigned[1:] if negative else args.assigned, outflow=negative)
+        relative = False
+    else:
+        amount = _milliunits(args.increase if args.increase is not None else args.decrease,
+                            outflow=args.decrease is not None)
+        relative = True
+    draft = planning.create_draft(_client(), store, month, args.category, amount, relative=relative)
+    _json_output(_draft_public(draft))
 
 
 def cmd_payees(args: argparse.Namespace, store: StateStore) -> None:
@@ -1362,6 +1392,13 @@ def cmd_drafts(args: argparse.Namespace, store: StateStore) -> None:
         _json_output(_draft_public(draft))
         return
 
+    if draft.get("operation") == "budget_assign":
+        if command == "resume":
+            raise CliError("Budget drafts cannot be resumed; reconcile an attempted assignment without replaying it")
+        _json_output(planning.execute(store, args.draft_id, client_factory=_client,
+                                     confirm=getattr(args, "confirm", None), reconcile=command == "reconcile"))
+        return
+
     _require_api_ready(store)
     # Always lock draft first, then a known transaction. Reload under the lock so
     # another caller's completed attempt cannot be replayed from our earlier read.
@@ -1448,7 +1485,7 @@ def _add_mutation_fields(parser: argparse.ArgumentParser, *, create: bool) -> No
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ynab-agent-skill",
-        description="Safely read and draft transaction changes through the YNAB public API.",
+        description="Read YNAB budgets and transactions, and prepare explicitly reviewed changes.",
     )
     parser.add_argument("--version", action="version", version=f"ynab-agent-skill {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1471,6 +1508,20 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("accounts", help="List active plan accounts")
     commands.add_parser("categories", help="List plan categories")
     commands.add_parser("payees", help="List plan payees")
+
+    budgets = commands.add_parser("budgets", help="Read monthly budgets and draft category assignments")
+    budget_commands = budgets.add_subparsers(dest="budgets_command", required=True)
+    budget_commands.add_parser("months", help="List monthly assigned, activity and Ready to Assign amounts")
+    budget_get = budget_commands.add_parser("get", help="Read assigned, activity and available by category")
+    budget_get.add_argument("month", help="Explicit YYYY-MM or YYYY-MM-01")
+    budget_get.add_argument("--category", help="Exact category, 'Group: Category', or id")
+    budget_assign = budget_commands.add_parser("draft-assign", help="Prepare a reviewed assignment; makes no API write")
+    budget_assign.add_argument("month", help="Explicit YYYY-MM or YYYY-MM-01")
+    budget_assign.add_argument("--category", required=True, help="Exact category, 'Group: Category', or id")
+    assignment = budget_assign.add_mutually_exclusive_group(required=True)
+    assignment.add_argument("--assigned", help="New total assigned amount; use --assigned=-AMOUNT for negatives")
+    assignment.add_argument("--increase", help="Positive amount to add to the current assignment")
+    assignment.add_argument("--decrease", help="Positive amount to subtract from the current assignment")
 
     transactions = commands.add_parser("transactions", help="Read transactions and create write drafts")
     transaction_commands = transactions.add_subparsers(dest="transactions_command", required=True)
@@ -1559,6 +1610,8 @@ def main(argv: Sequence[str] | None = None, *, store: StateStore | None = None) 
             cmd_categories(args, state)
         elif args.command == "payees":
             cmd_payees(args, state)
+        elif args.command == "budgets":
+            cmd_budgets(args, state)
         elif args.command == "transactions":
             cmd_transactions(args, state)
         elif args.command == "drafts":

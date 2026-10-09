@@ -7,12 +7,12 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-from validation import audit_mutation_checks, audit_new_payee_checks, audit_transaction_read_checks
+from validation import audit_mutation_checks, audit_new_payee_checks, audit_transaction_read_checks, audit_budget_planning_checks
 
 
 class MutationGateTests(unittest.TestCase):
     def reject(self, control, mutated):
-        for module in (audit_mutation_checks, audit_new_payee_checks, audit_transaction_read_checks):
+        for module in (audit_mutation_checks, audit_new_payee_checks, audit_transaction_read_checks, audit_budget_planning_checks):
             with self.subTest(runner=module.__name__):
                 outcomes = iter([control])
                 def fake_run(names):
