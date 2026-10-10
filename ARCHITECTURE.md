@@ -79,7 +79,7 @@ These arrows show responsibility and data flow. `SKILL.md` is an instruction fil
 
 ### Launcher and package metadata
 
-[`bin/ynab-agent-skill`](bin/ynab-agent-skill) uses `/usr/bin/python3`, finds the checkout from its own resolved path, adds that root to Python's import path, and calls `budget_tools.cli.main()`. It disables bytecode-cache writes. The launcher and package must stay together; running it from another working directory is supported.
+[`bin/ynab-agent-skill`](bin/ynab-agent-skill) uses `env python3`, finds the checkout from its own resolved path, adds that root to Python's import path, and calls `budget_tools.cli.main()`. It disables bytecode-cache writes. The launcher and package must stay together; running it from another working directory is supported.
 
 [`budget_tools/__init__.py`](budget_tools/__init__.py) declares `__version__`. The parser's version string and API user agent derive their versions from that single value.
 
