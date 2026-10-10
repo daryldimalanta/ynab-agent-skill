@@ -125,7 +125,7 @@ transactions draft-update TRANSACTION_ID --category CATEGORY --memo "Updated mem
 
 These generic commands skip the receipt-assessment conversion path. You can edit specific fields (such as `--memo`, `--clear-memo`, `--category`, or `--uncategorized`) for an existing transaction without altering its other properties.
 
-If an existing transaction has the wrong payee and you need to assign a new, non-existent merchant, you can use `--new-payee "CONFIRMED NAME"` with `draft-update` to explicitly rename the payee. Always review the drafted changes with the user before applying.
+If an existing transaction has the wrong payee and you need to assign a new, non-existent merchant, you can use `--new-payee "CONFIRMED NAME"` with `draft-update` to create that missing payee and assign it to the transaction. This does not rename a shared payee record. Always review the drafted changes with the user before applying.
 
 ## Draft review and application
 

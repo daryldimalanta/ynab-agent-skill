@@ -190,7 +190,7 @@ class ReceiptContractWorkflow(OfflineCase):
 
     def run_cli(self, *args):
         out, err = io.StringIO(), io.StringIO()
-        with patch("budget_tools.cli._client", return_value=self.client), redirect_stdout(out), redirect_stderr(err):
+        with patch("budget_tools.utils._client", return_value=self.client), redirect_stdout(out), redirect_stderr(err):
             code = main(list(args), store=self.store)
         return code, json.loads(out.getvalue()) if out.getvalue() else None, err.getvalue()
 

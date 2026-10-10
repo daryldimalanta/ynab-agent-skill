@@ -1,6 +1,18 @@
 # Validation
 
-## Current source: monthly budget planning — 2026-10-08
+## Current source: shared host installation and offline quality gate — 2026-10-09
+
+Version `0.7.0`; Python `3.9.6` on Darwin `25.6.0` / `arm64`. Financial runtime code and persisted draft formats are unchanged. Both hosts use the same canonical skill. Installer fixes add explicit public artifacts, genuinely read-only previews, unique per-host private backups, current-preference priority, staged byte verification and rollback across hosts on caught failures. Hard kills/power loss still require recovery from retained backups.
+
+`/usr/bin/python3 -B -m tools.quality full` completed with exit 0: **221 core tests, 50 safety tests, all 28 required financial faults detected**, and the bounded consistency check passed. Seven quality-runner cases and nine installer cases were added; existing safety assertions were retained. Earlier runner integration errors were repaired before this final run. No skipped cases, collection errors or mutation setup errors were accepted as passes.
+
+Source SHA-256: `1e65f163a602b3bc53dc5dbb79b7aff1cc0ed3b63ea19ebc4f173748364f55a3`; base revision `77470fecbab7dcabe594e80d3a32b61c8e3d8f81` plus the tested working changes. This digest uses `tools/source_manifest.txt` and `tools.consistency.digest`: sorted relative names, NUL, exact file bytes, NUL. It includes the manifest and new untracked source; excludes this historical/current report and the privacy review. The report records completed commands, controls, faults, totals, terminal statuses, runtime and matching source identity. This reporting-only update does not change that digest.
+
+Canonical source and both installed copies pass Skill Creator validation. All seven public installed files match source for each host; private preference bytes and mode 600 were preserved, skill roots remain mode 700, and neither host retains an active legacy skill. Help/version launchers agree. Scoped source privacy scanning and whitespace checks passed; this is not a new audit of all published history.
+
+The Python guard restricts accidental access during reviewed offline checks; it is not a hostile-code OS sandbox. File installation does not establish native UI discovery or interpretation quality. Model acceptance scenarios and a live financial pilot remain unrun. Packaging/runtime modernization, the larger transaction-workflow extraction and compatibility/reuse milestones remain proposed; this shared-host milestone does not claim the entire engineering plan is implemented. No publication or live financial operation was performed.
+
+## Historical source: monthly budget planning — 2026-10-08
 
 Version `0.7.0`; Python `3.9.6` on macOS `26.7.1` / arm64. Monthly reads report assigned, activity, authoritative available balances, Ready to Assign and currency metadata. Single-category assignment drafts use the existing seal format with confirmation, expiry, local draft/plan locks, stale-state and rate-wait revalidation, durable checkpoints and GET-only reconciliation. Existing transaction behavior and private-state identities are retained.
 

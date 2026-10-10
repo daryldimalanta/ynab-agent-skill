@@ -14,7 +14,7 @@ For a codebase walkthrough, read [Project structure and architecture](ARCHITECTU
 
 ## Local setup
 
-This checkout uses only the Python standard library at runtime. The launcher uses `/usr/bin/python3`. Validation targets macOS with local APFS/HFS storage; Linux and Windows are not supported or tested. The tested interpreter and macOS version are recorded in the validation report; a broader version range has not been established.
+This checkout uses only the Python standard library at runtime. The launcher uses `python3` (Python 3.10+ required). Validation targets macOS with local APFS/HFS storage; Linux and Windows are not supported or tested. The tested interpreter and macOS version are recorded in the validation report.
 
 ### Installing the skill
 
@@ -26,14 +26,14 @@ The distributable skill is located at `skills/ynab-agent-skill`. To install it n
 ./install.sh both
 ```
 
-- **Prerequisites**: macOS, `bash`.
+- **Prerequisites**: macOS, `bash`, Python 3.10+.
 - **Native installation locations**:
   - Codex: `~/.codex/skills/ynab-agent-skill`
   - Antigravity IDE: `~/.gemini/config/skills/ynab-agent-skill`
 - **What it does**: The installer copies the reviewed skill files. It preserves your existing private preferences (`references/local-preferences.md`) byte-for-byte across updates. If no preferences exist, it generates a minimal file pointing to the checkout's executable. It also handles legacy `ynab-codex-skill` migration to avoid duplicate active skills and creates safe backups in `~/.ynab-agent-skill-backups/`.
 - **Dry run**: Add `--dry-run` to preview changes without modifying the filesystem.
 
-**Note**: Installing the skill does not install a standalone application. The CLI and Python package (`budget_tools`) remain in this repository checkout. The installed skill finds the local executable via the `local-preferences.md` file generated during installation, or by searching your PATH. Native skill discovery by the host app may require a fresh session or reload. The installer performs file verification but does not run a live financial workflow test.
+**Note**: Installing the skill does not install a standalone application. The CLI and Python package (`budget_tools`) remain in this repository checkout. The installed skill finds the local executable via the `local-preferences.md` file generated during installation, or by searching your PATH. Native skill discovery by the host app may require a fresh session or reload. The installer verifies each installed public file and private preference bytes. Each host update is staged and verified before replacement. The installer keeps separate unique backups per host and restores both prior installations on a caught update failure. A process kill or power loss can require manual restoration from those backups. Only the seven explicitly listed public skill files are distributed; extra source files are excluded. Unknown or linked storage paths are rejected. It does not run a live financial workflow test.
 
 ### Using the CLI directly
 
@@ -150,7 +150,7 @@ ynab-agent-skill transactions draft-create --account ACCOUNT --date YYYY-MM-DD \
 ynab-agent-skill transactions draft-update TRANSACTION_ID --category CATEGORY
 ```
 
-These generic commands skip the receipt-assessment conversion path. You can edit specific fields (e.g., `--memo`, `--clear-memo`, `--category`, `--uncategorized`) for an existing transaction without affecting others. To fix an unknown merchant, use `--new-payee "CONFIRMED NAME"` to explicitly rename an existing transaction's payee. As always, changes must be reviewed as a local draft before being applied with `drafts apply`.
+These generic commands skip the receipt-assessment conversion path. You can edit specific fields (e.g., `--memo`, `--clear-memo`, `--category`, `--uncategorized`) for an existing transaction without affecting others. To fix an unknown merchant, use `--new-payee "CONFIRMED NAME"` to create the missing payee and assign that transaction to it (this does not rename a shared payee record). As always, changes must be reviewed as a local draft before being applied with `drafts apply`.
 
 ## Arithmetic, recovery, and limits
 
@@ -170,22 +170,33 @@ Delayed mutations revalidate the target and check draft expiry before sending. A
 
 ## Offline verification
 
-From the checkout root:
+From the checkout root, use the same checked-in runner in either agent:
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest discover -s tests -q
-PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest discover -s validation -q
-PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m validation.audit_mutation_checks
-PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m validation.audit_new_payee_checks
-PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m validation.audit_transaction_read_checks
-PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m validation.audit_budget_planning_checks
+python3 -B -m tools.quality quick
+python3 -B -m tools.quality full
+```
+
+`quick` runs source consistency and both ordinary suites. `full` also runs all four mutation diagnostics. The runner uses synthetic temporary state and a Python guard inherited by child processes; it blocks accidental network, Keychain, existing home-file and private application-state access. Installer subprocesses are restricted to synthetic homes. This is a guard for reviewed Python tests, not an operating-system sandbox against hostile or native code. Reports go only to ignored `tmp/quality/`, with source revision/digest, interpreter/platform, commands, exit status and structured results; raw test output and private values are excluded. Confirm a saved report still matches the source with `python3 -B -m tools.quality full --check-report tmp/quality/REPORT.json`. A quick report cannot satisfy a full-report check.
+
+Maintain `tools/source_manifest.txt` when adding source or instruction files. The checker verifies the installer allowlist, canonical version, standalone license, discovery metadata, selected CLI shapes and current-document file links. It does not validate every prose claim or replace model interpretation evaluations. Historical reports are excluded from the source digest.
+
+For focused development, the underlying commands are listed below; these alone do not activate the offline guard:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -q
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s validation -q
+PYTHONDONTWRITEBYTECODE=1 python3 -m validation.audit_mutation_checks
+PYTHONDONTWRITEBYTECODE=1 python3 -m validation.audit_new_payee_checks
+PYTHONDONTWRITEBYTECODE=1 python3 -m validation.audit_transaction_read_checks
+PYTHONDONTWRITEBYTECODE=1 python3 -m validation.audit_budget_planning_checks
 ```
 
 Fixtures are synthetic. Both test directories must be run. The general mutation diagnostic injects seven faults in memory; the new-payee diagnostic injects four, the transaction-read diagnostic injects ten, and the budget-planning diagnostic injects seven. All require a passing unmodified control and exit nonzero for missed faults or test errors. Assertion failures from an exercised fault are detection evidence, not normal regressions; loader/fixture errors do not count. The [receipt acceptance checklist](validation/RECEIPT_ACCEPTANCE_CASES.md) and [budget acceptance checklist](validation/BUDGET_ACCEPTANCE_CASES.md) are separate from automated tests. No live integration test is run automatically.
 
 ## Distribution status
 
-This source snapshot is prepared for local use. It has not been published. See [PRIVACY_REVIEW.md](PRIVACY_REVIEW.md) for the reviewed scope and publication boundaries.
+Source releases and local checkout changes are separate. A local passing report does not mean those bytes have been committed or published; inspect the checkout revision and diff before distributing it. See [PRIVACY_REVIEW.md](PRIVACY_REVIEW.md) for the reviewed scope and publication boundaries.
 
 ## License
 

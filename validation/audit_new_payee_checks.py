@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from budget_tools import api, cli
+from validation.mutation_support import patch_everywhere
 
 
 def run(names):
@@ -40,14 +41,14 @@ def main():
         return result
 
     faults = [
-        ("skip_missing_name_checks", patch.object(cli, "_require_missing_payee", lambda *args: None),
+        ("skip_missing_name_checks", patch_everywhere("_require_missing_payee", lambda *args: None),
          ["test_new_payee_appearing_before_apply_requires_fresh_review",
           "test_new_payee_appearing_during_429_wait_blocks_retry"]),
         ("drop_new_payee_name_in_request", patch.object(api.YnabClient, "request", drop_name),
          ["test_success_creates_once_then_verifies_and_approves"]),
-        ("ignore_wrong_payee_name", patch.object(cli, "_receipt_verification", ignore_name),
+        ("ignore_wrong_payee_name", patch_everywhere("_receipt_verification", ignore_name),
          ["test_name_changed_before_approval_blocks_approval"]),
-        ("forget_assigned_payee_id", patch.object(cli, "_record_created_payee", lambda *args: None),
+        ("forget_assigned_payee_id", patch_everywhere("_record_created_payee", lambda *args: None),
          ["test_same_name_different_id_after_ack_blocks_approval",
           "test_identity_change_during_approval_wait_blocks_approval"]),
     ]

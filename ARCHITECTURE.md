@@ -8,6 +8,8 @@ This guide maps the current implementation (versioned in `budget_tools/__init__.
 
 ```text
 ynab-agent-skill/
+├── .python-version                  Local uv Python runtime requirement
+├── install.sh                       Installer and active skill synchronizer
 ├── bin/
 │   ├── ynab-agent-skill              Canonical executable launcher
 │   └── ynab-codex-skill              Compatibility command alias
@@ -29,12 +31,20 @@ ynab-agent-skill/
 │   ├── references/long-runs.md      Batch checkpoints and recovery
 │   └── agents/openai.yaml           Optional Codex display metadata and example prompt
 ├── tests/                           Core, receipt, creation, and API-contract tests
+├── tools/                           Offline validation and quality scripts
+│   ├── checks.py                    Suite runner for validation/tests
+│   ├── consistency.py               Source manifest and doc-drift checks
+│   ├── quality.py                   Quality diagnostic and JSON reporter
+│   ├── source_manifest.txt          Explicit distribution allowlist
+│   └── offline_guard/               Accidental access protection for tests
 ├── validation/                      Additional safety regressions and diagnostics
 │   ├── test_receipt_workflow_requirements.py
 │   ├── test_post_implementation_safety.py
 │   ├── test_repair_safety.py
 │   ├── audit_mutation_checks.py
-│   └── RECEIPT_ACCEPTANCE_CASES.md   Planned model evaluations, not completed tests
+│   ├── audit_budget_planning_checks.py
+│   ├── RECEIPT_ACCEPTANCE_CASES.md   Planned model evaluations, not completed tests
+│   └── BUDGET_ACCEPTANCE_CASES.md    Planned planning evaluations
 ├── README.md                        Setup, supported behavior, and limits
 ├── AGENTS.md                        Generic contributor and engineering rules
 ├── ARCHITECTURE.md                  This guide
@@ -257,3 +267,9 @@ Run both unittest discovery commands and all four mutation diagnostics in [READM
 | Change how The agent interprets or reviews a receipt | `SKILL.md` and its proposal reference | Skill validation and separately observed interpretation evaluations |
 
 Use synthetic fixtures for development. Preserve exact expected categories, amounts, memos, and attempted-write counts where they matter; a balanced total alone cannot demonstrate a correct financial change. Documentation edits should be checked against the implementation and linked files without running live account commands.
+
+## Shared host installation and offline checks
+
+`install.sh` delegates to `tools/install_skill.py`, which distributes one allowlisted skill to Codex and Antigravity IDE. Host UI metadata stays in `agents/openai.yaml`; financial behavior remains in the shared Python application. Staging, byte verification, private preference preservation, per-host recovery archives and caught-failure rollback protect updates. No app registration or live financial test is implied by file installation.
+
+`tools/quality.py` launches the same isolated offline suites for either host and records source-bound results. `tools/offline_guard/sitecustomize.py` propagates accidental-access restrictions to reviewed Python children. `tools/consistency.py` checks a bounded set of public contracts against an explicit source manifest. These tools do not replace semantic review, hostile-code isolation, model interpretation evaluations or a separately authorized live pilot. Broader packaging and transaction-workflow extraction remain proposed.

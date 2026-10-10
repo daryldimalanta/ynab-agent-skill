@@ -95,9 +95,9 @@ class RateLimitTests(OfflineCase):
         self.assertEqual(sum(self.clock.sleeps), 601)
 
     def test_cli_attaches_persistent_limiter(self):
-        from budget_tools.cli import _client
-        with patch("budget_tools.cli.read_access_token", return_value="SYNTHETIC-LIMIT-TOKEN"), \
-             patch("budget_tools.cli.StateStore", return_value=self.store):
+        from budget_tools.utils import _client
+        with patch("budget_tools.utils.read_access_token", return_value="SYNTHETIC-LIMIT-TOKEN"), \
+             patch("budget_tools.utils.StateStore", return_value=self.store):
             client = _client()
         self.assertIsInstance(client._rate_limiter, RateLimiter)
         self.assertEqual(client._rate_limiter.path, self.limiter.path)

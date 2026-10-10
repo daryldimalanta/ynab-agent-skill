@@ -89,7 +89,7 @@ class OfflineCase(unittest.TestCase):
         self.addCleanup(mount.stop)
         # Unexpected network or credential access is a test failure, not a fallback.
         for target in ("socket.create_connection", "socket.socket.connect",
-                       "socket.getaddrinfo", "budget_tools.cli.read_access_token"):
+                       "socket.getaddrinfo", "budget_tools.utils.read_access_token"):
             blocker = patch(target, side_effect=AssertionError("Offline review forbids network/credentials"))
             blocker.start()
             self.addCleanup(blocker.stop)
@@ -113,7 +113,7 @@ class WorkflowAcceptance(OfflineCase):
 
     def run_cli(self, *arguments):
         stdout, stderr = io.StringIO(), io.StringIO()
-        with patch("budget_tools.cli._client", return_value=self.client):
+        with patch("budget_tools.utils._client", return_value=self.client):
             with redirect_stdout(stdout), redirect_stderr(stderr):
                 code = main(list(arguments), store=self.store)
         return code, json.loads(stdout.getvalue()) if stdout.getvalue() else None, stderr.getvalue()
@@ -236,10 +236,10 @@ class CountingClient(FakeClient):
 def forbidden(*args, **kwargs):
     raise AssertionError("Offline worker forbids network/credentials")
 with patch("socket.create_connection", forbidden), patch("socket.socket.connect", forbidden), \
-     patch("socket.getaddrinfo", forbidden), patch("budget_tools.cli.read_access_token", forbidden), \
+     patch("socket.getaddrinfo", forbidden), patch("budget_tools.utils.read_access_token", forbidden), \
      patch("budget_tools.state.subprocess.run", return_value=CompletedProcess(
          ["/sbin/mount"], 0, stdout="synthetic-device on /private/tmp (apfs, local)\n", stderr="")), \
-     patch("budget_tools.cli._client", return_value=CountingClient()):
+     patch("budget_tools.utils._client", return_value=CountingClient()):
     store = StateStore(Path(sys.argv[1]))
     (store.root / ("ready-" + worker_id)).touch(mode=0o600)
     deadline = time.monotonic() + 10

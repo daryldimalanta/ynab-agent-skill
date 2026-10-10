@@ -77,4 +77,4 @@ Before reporting a task complete:
 4. Keep the current implementation guide accurate and historical evidence intact.
 5. Report what changed, what was actually verified, any compatibility or remaining validation limits, and any work that is still only planned.
 
-Automated cross-document consistency enforcement is not installed. Perform the applicable checks explicitly and do not claim automated enforcement. If a gate is added, run it and still review semantic consistency; a scanner cannot prove every prose claim.
+Run `python3 -B -m tools.quality quick` for source consistency and both ordinary suites; use `full` for all financial mutation gates. Maintain the explicit source manifest and inspect the structured local report. The bounded checker covers selected contracts, not every prose claim; semantic consistency still requires review. Never call a quick report a full mutation run.

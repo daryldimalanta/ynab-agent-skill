@@ -22,7 +22,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from budget_tools.api import ApiError, YnabClient, _default_transport
-from budget_tools.cli import CliError, _currency_string, _fingerprint, _milliunits, cmd_drafts, main
+from budget_tools.errors import CliError
+from budget_tools.cli import cmd_drafts, main, _fingerprint
+from budget_tools.utils import _currency_string, _milliunits
 from budget_tools.state import StateError, StateStore, TERMS_VERSION, read_private_json
 from tests.test_receipts import proposal as receipt_proposal
 
@@ -291,7 +293,7 @@ class CliWorkflowTests(unittest.TestCase):
     def run_cli(self, arguments):
         stdout = io.StringIO()
         stderr = io.StringIO()
-        with patch("budget_tools.cli._client", return_value=self.fake):
+        with patch("budget_tools.utils._client", return_value=self.fake):
             with redirect_stdout(stdout), redirect_stderr(stderr):
                 code = main(arguments, store=self.store)
         parsed = json.loads(stdout.getvalue()) if stdout.getvalue() else None
@@ -639,8 +641,8 @@ class CliWorkflowTests(unittest.TestCase):
             except CliError:
                 return "blocked"
 
-        with patch("budget_tools.cli._client", return_value=self.fake):
-            with patch("budget_tools.cli._json_output"):
+        with patch("budget_tools.utils._client", return_value=self.fake):
+            with patch("budget_tools.utils._json_output"):
                 with ThreadPoolExecutor(max_workers=2) as pool:
                     results = list(pool.map(lambda _: apply_once(), range(2)))
         self.assertEqual(sorted(results), ["applied", "blocked"])

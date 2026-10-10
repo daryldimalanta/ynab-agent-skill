@@ -368,10 +368,10 @@ class SharedClient(FakeClient):
             os.fsync(handle.fileno())
         return result
 with patch("socket.create_connection", forbidden), patch("socket.socket.connect", forbidden), \
-     patch("socket.getaddrinfo", forbidden), patch("budget_tools.cli.read_access_token", forbidden), \
+     patch("socket.getaddrinfo", forbidden), patch("budget_tools.utils.read_access_token", forbidden), \
      patch("budget_tools.state.subprocess.run", return_value=CompletedProcess(
          [], 0, stdout="synthetic on /private/tmp (apfs, local)\n", stderr="")), \
-     patch("budget_tools.cli._client", return_value=SharedClient()):
+     patch("budget_tools.utils._client", return_value=SharedClient()):
     store = StateStore(Path(sys.argv[1]))
     server = store.root / "synthetic-server.json"
     draft_id, index = sys.argv[2:4]

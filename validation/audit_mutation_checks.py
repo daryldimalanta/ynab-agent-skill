@@ -14,7 +14,8 @@ import re
 import unittest
 from unittest.mock import patch
 
-from budget_tools import api, cli
+from budget_tools import api
+from validation.mutation_support import patch_everywhere
 
 BASELINE = ["tests.test_budget_tools", "tests.test_receipts", "tests.test_receipt_creation",
             "validation.test_receipt_workflow_requirements", "validation.test_post_implementation_safety",
@@ -64,10 +65,10 @@ def main():
     for name in ("drop_until_date", "lose_account_scope", "wrong_write_wrapper", "drop_split_memos", "drop_parent_marker",
                  "skip_expiry", "skip_receipt_verification"):
         if name == "skip_expiry":
-            mutation = patch.object(cli, "_check_draft_age", lambda draft: None)
+            mutation = patch_everywhere("_check_draft_age", lambda draft: None)
         elif name == "skip_receipt_verification":
-            mutation = patch.object(cli, "_receipt_verification",
-                                    lambda *args, **kwargs: {"verified": True, "mismatches": {}})
+            mutation = patch_everywhere("_receipt_verification",
+                                       lambda *args, **kwargs: {"verified": True, "mismatches": {}})
         else:
             mutation = request_fault(name)
         with mutation:

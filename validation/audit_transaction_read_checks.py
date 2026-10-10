@@ -10,9 +10,12 @@ import copy
 import io
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock
 
-from budget_tools import api, cli
+from budget_tools import api, transactions
+from validation.mutation_support import WORKFLOW_MODULES as WORKFLOW, patch_everywhere
+
+API = (api,)
 
 SUITE = "tests.test_transaction_reads.PostedTransactionTests"
 
@@ -29,7 +32,7 @@ def main():
     if control["errors"] or control["failures"] or not control["tests"]:
         raise SystemExit("The unmodified read-contract tests must pass")
 
-    safe_id, detail, summary, query = api._safe_id, cli._transaction_detail, cli._transaction_summary, cli._transaction_query
+    safe_id, detail, summary, query = api._safe_id, transactions._transaction_detail, transactions._transaction_summary, transactions._transaction_query
 
     def reject_suffix(value):
         if "_" in value:
@@ -69,29 +72,30 @@ def main():
         return result
 
     faults = [
-        ("reject_suffixed_ids", api, "_safe_id", reject_suffix, "test_full_id_reaches_get_unchanged"),
-        ("strip_id_suffix", api, "_safe_id", lambda value: safe_id(value).split("_")[0],
+        ("reject_suffixed_ids", API, "_safe_id", reject_suffix, "test_full_id_reaches_get_unchanged"),
+        ("strip_id_suffix", API, "_safe_id", lambda value: safe_id(value).split("_")[0],
          "test_get_and_update_preserve_path_without_simulator_routing"),
-        ("allow_unsafe_id_delimiters", api, "_safe_id", lambda value: value,
+        ("allow_unsafe_id_delimiters", API, "_safe_id", lambda value: value,
          "test_unsafe_delimiters_never_reach_accepting_transport"),
-        ("omit_split_lines", cli, "_transaction_detail", alter_detail("omit_lines"),
+        ("omit_split_lines", WORKFLOW, "_transaction_detail", alter_detail("omit_lines"),
          "test_bulk_splits_preserve_exact_line_and_parent_context"),
-        ("drop_parent_and_line_memos", cli, "_transaction_detail", alter_detail("drop_memos"),
+        ("drop_parent_and_line_memos", WORKFLOW, "_transaction_detail", alter_detail("drop_memos"),
          "test_bulk_splits_preserve_exact_line_and_parent_context"),
-        ("lose_split_amount_signs", cli, "_transaction_detail", alter_detail("lose_sign"),
+        ("lose_split_amount_signs", WORKFLOW, "_transaction_detail", alter_detail("lose_sign"),
          "test_bulk_splits_preserve_exact_line_and_parent_context"),
-        ("skip_posted_recurring_entries", cli, "_transaction_query", skip_suffixed,
+        ("skip_posted_recurring_entries", WORKFLOW, "_transaction_query", skip_suffixed,
          "test_bulk_uses_one_list_request_and_never_fetches_each_record"),
-        ("fetch_each_parent", cli, "_transaction_query", fetch_individually,
+        ("fetch_each_parent", WORKFLOW, "_transaction_query", fetch_individually,
          "test_bulk_uses_one_list_request_and_never_fetches_each_record"),
-        ("change_default_list_contract", cli, "_transaction_summary", change_default,
+        ("change_default_list_contract", WORKFLOW, "_transaction_summary", change_default,
          "test_default_list_contract_is_unchanged"),
-        ("infer_date_from_id", cli, "_transaction_summary", infer_date,
+        ("infer_date_from_id", WORKFLOW, "_transaction_summary", infer_date,
          "test_default_list_contract_is_unchanged"),
     ]
     invalid = []
-    for name, module, symbol, broken, test in faults:
-        with patch.object(module, symbol, side_effect=broken) as injection:
+    for name, modules, symbol, broken, test in faults:
+        injection = MagicMock(side_effect=broken)
+        with patch_everywhere(symbol, injection, modules):
             result = run([SUITE + "." + test])
         exercised = injection.call_count > 0
         detected = exercised and result["failures"] > 0 and result["errors"] == 0

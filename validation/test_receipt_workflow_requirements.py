@@ -30,7 +30,9 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from budget_tools.api import ApiError, YnabClient, _default_transport
-from budget_tools.cli import main, cmd_drafts, _milliunits, CliError
+from budget_tools.cli import main, cmd_drafts
+from budget_tools.errors import CliError
+from budget_tools.utils import _milliunits
 from budget_tools.state import StateStore, TERMS_VERSION
 from tests.test_budget_tools import FakeClient
 
@@ -82,7 +84,7 @@ class WorkflowChecks(unittest.TestCase):
 
     def run_cli(self, args):
         stdout, stderr = io.StringIO(), io.StringIO()
-        with patch('budget_tools.cli._client', return_value=self.client):
+        with patch('budget_tools.utils._client', return_value=self.client):
             with redirect_stdout(stdout), redirect_stderr(stderr):
                 code = main(args, store=self.store)
         return code, json.loads(stdout.getvalue()) if stdout.getvalue() else None, stderr.getvalue()
@@ -242,8 +244,8 @@ class WorkflowChecks(unittest.TestCase):
                 cmd_drafts(args, self.store)
             except CliError:
                 pass
-        with patch('budget_tools.cli._client', return_value=self.client):
-            with patch('budget_tools.cli._json_output'):
+        with patch('budget_tools.utils._client', return_value=self.client):
+            with patch('budget_tools.utils._json_output'):
                 with ThreadPoolExecutor(max_workers=2) as pool:
                     futures = [pool.submit(apply_once) for _ in range(2)]
                     for future in futures:

@@ -45,3 +45,33 @@ class MutationGateTests(unittest.TestCase):
 
     def test_empty_control_invalidates_experiment(self):
         self.reject(self.result(tests=0), self.result())
+
+
+class PatchEverywhereTests(unittest.TestCase):
+    """Moved helpers must be replaced in every module that calls them."""
+
+    def test_replaces_and_restores_every_binding(self):
+        from budget_tools import cli, transactions
+        from validation.mutation_support import patch_everywhere
+        original = transactions._receipt_verification
+        self.assertIs(cli._receipt_verification, original)
+        marker = object()
+        with patch_everywhere("_receipt_verification", marker):
+            self.assertIs(cli._receipt_verification, marker)
+            self.assertIs(transactions._receipt_verification, marker)
+        self.assertIs(cli._receipt_verification, original)
+        self.assertIs(transactions._receipt_verification, original)
+
+    def test_unknown_symbol_is_rejected(self):
+        from validation.mutation_support import patch_everywhere
+        with self.assertRaisesRegex(AttributeError, "_not_a_workflow_helper"):
+            with patch_everywhere("_not_a_workflow_helper", None):
+                pass
+
+    def test_divergent_bindings_are_rejected(self):
+        from budget_tools import cli
+        from validation.mutation_support import patch_everywhere
+        with patch.object(cli, "_receipt_verification", object()):
+            with self.assertRaisesRegex(AssertionError, "different objects"):
+                with patch_everywhere("_receipt_verification", None):
+                    pass
