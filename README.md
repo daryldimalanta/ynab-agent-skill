@@ -14,7 +14,7 @@ For a codebase walkthrough, read [Project structure and architecture](ARCHITECTU
 
 ## Local setup
 
-This checkout uses only the Python standard library at runtime and requires Python 3.10+. The application, installer and quality runner prefer this checkout's `.venv`; otherwise they require a supported `python3` on PATH. `.python-version` alone does not configure a system interpreter. The verified environment uses Python 3.12.15.
+This checkout uses only the Python standard library at runtime and supports Python 3.12 on macOS (package requirement: `>=3.12,<3.13`). The application, installer and quality runner prefer this checkout's `.venv`; otherwise they require a supported `python3` on PATH. `.python-version` alone does not configure a system interpreter. The verified environment uses Python 3.12.15 on Apple Silicon macOS. Other Python minor versions are not supported. Future 3.12 security patch releases are allowed; each validation report records the exact patch version exercised.
 
 For a fresh checkout, install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
 
@@ -36,7 +36,7 @@ The distributable skill is located at `skills/ynab-agent-skill`. To install it n
 ./install.sh both
 ```
 
-- **Prerequisites**: macOS, `bash`, and the project environment above (or Python 3.10+ on PATH).
+- **Prerequisites**: macOS, `bash`, and the project environment above (or Python 3.12 on PATH).
 - **Native installation locations**:
   - Codex: `~/.codex/skills/ynab-agent-skill`
   - Antigravity IDE: `~/.gemini/config/skills/ynab-agent-skill`

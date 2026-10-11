@@ -370,8 +370,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None, *, store: StateStore | None = None) -> int:
-    if sys.version_info < (3, 10):
-        raise SystemExit("Python 3.10+ required")
+    if sys.version_info[:2] != (3, 12):
+        raise SystemExit("Python 3.12 required")
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

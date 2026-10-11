@@ -36,7 +36,7 @@ def verify(root, archive):
             raise ValueError("Wheel README metadata differs")
         if metadata["Name"] != "ynab-agent-skill" or metadata["Version"] != __version__:
             raise ValueError("Wheel package identity differs")
-        if metadata["Requires-Python"] != ">=3.10" or metadata.get_all("Requires-Dist"):
+        if metadata["Requires-Python"] != "<3.13,>=3.12" or metadata.get_all("Requires-Dist"):
             raise ValueError("Wheel runtime requirements differ")
         entrypoints = wheel.read(metadata_dir + "entry_points.txt").decode()
         for name in ("ynab-agent-skill", "ynab-codex-skill"):

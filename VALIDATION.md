@@ -1,6 +1,16 @@
 # Validation
 
-## Current source: deficiency corrections — 2026-10-11
+## Current source: Python 3.12 support policy — 2026-10-11
+
+Version `0.7.0`; base `079e5e4` plus runtime-policy, metadata, documentation and regression-test changes. Supported runtime: **Python 3.12 on macOS**, with package requirement `>=3.12,<3.13`. Verified interpreter: **Python 3.12.15**, Darwin `25.6.0` / `arm64`. Other Python minor versions are unsupported; other 3.12 patch versions are allowed but were not independently exercised.
+
+`TMPDIR=/private/tmp PYTHONDONTWRITEBYTECODE=1 env python3 -B -m tools.quality quick` completed with exit 0: source consistency, **244 core tests and 50 safety tests**, zero failures, errors or skips. Local report: `tmp/quality/20261011T161929207354Z.json`; source SHA-256: `c2232942d3a6f7afdcd3ddfc888595f98cded1c943413e31f9fc4dadddfe4aef`. Four runtime cases were added and the existing unsupported-runtime case was expanded; existing safety assertions remain. Simulated version boundaries verify rejection before CLI dispatch and rejection of an unsupported selected environment; simulated patch versions verify the fallback policy. These simulations do not establish compatibility with additional installed interpreters. The default system command successfully selected the project environment.
+
+`PYTHONDONTWRITEBYTECODE=1 python3 -B -m tools.dev_checks` passed lint, seven-module formatting and two-module strict typing. `uv lock --check --offline` passed after lock regeneration. `uv build --offline --wheel --out-dir /private/tmp/ynab-py312-wheel` and `.venv/bin/python -B -m tools.check_wheel /private/tmp/ynab-py312-wheel/ynab_agent_skill-0.7.0-py3-none-any.whl` passed; all 18 wheel members, exact source/README bytes and narrowed runtime metadata were verified. Skill Creator validation passed with an isolated PyYAML dependency. Diff whitespace passed.
+
+This quick run does not rerun the financial mutation diagnostics; their prior full-run evidence is retained below and predates this change. Financial workflow logic and stored state formats are unchanged. Canonical skill guidance was updated in source; host installations were not refreshed and retain the earlier runtime wording. Native host discovery, model interpretation evaluations and live financial pilots remain unrun. No system Python replacement, live financial operation or publication was performed.
+
+## Historical source: deficiency corrections — 2026-10-11
 
 Version `0.7.0`; base `f389560` plus uncommitted implementation/tests/docs. Python `3.12.15` on Darwin `25.6.0` / `arm64`. Source SHA-256: `338de17ac27d553cbc5e6dc26669bc8714c593fd3adde9725b4fd5bb0f1c1255`. The manifest digest includes all new public source/configuration files; only the named generated reports and build/cache directories are excluded.
 

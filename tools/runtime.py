@@ -37,10 +37,10 @@ def interpreter(root):
         try:
             info = current.lstat()
         except FileNotFoundError:
-            if sys.version_info >= (3, 10):
+            if sys.version_info[:2] == (3, 12):
                 return Path(sys.executable)
             raise InstallError(
-                "Python 3.10+ required; create .venv with Python 3.12 (see README)"
+                "Python 3.12 required; create .venv with Python 3.12 (see README)"
             ) from None
         if stat.S_ISLNK(info.st_mode):
             links += 1
@@ -66,5 +66,5 @@ def bootstrap(root, arguments):
         raise SystemExit(str(exc)) from exc
     if os.path.abspath(sys.executable) != str(target):
         os.execv(str(target), [str(target), *arguments])
-    if sys.version_info < (3, 10):
-        raise SystemExit("Python 3.10+ required; recreate .venv with Python 3.12")
+    if sys.version_info[:2] != (3, 12):
+        raise SystemExit("Python 3.12 required; recreate .venv with Python 3.12")

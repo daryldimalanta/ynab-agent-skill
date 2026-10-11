@@ -15,9 +15,41 @@ from tools.install_skill import InstallError
 class RuntimeTests(unittest.TestCase):
     def test_unsupported_python_without_project_environment_fails_helpfully(self):
         with tempfile.TemporaryDirectory() as temporary:
-            with patch.object(sys, 'version_info', (3, 9, 6)):
-                with self.assertRaisesRegex(InstallError, 'create .venv'):
-                    runtime.interpreter(Path(temporary))
+            for version in ((3, 9, 6), (3, 10, 0), (3, 11, 0), (3, 13, 0), (4, 0, 0)):
+                with self.subTest(version=version), patch.object(sys, 'version_info', version):
+                    with self.assertRaisesRegex(InstallError, 'Python 3.12 required; create .venv'):
+                        runtime.interpreter(Path(temporary))
+
+    def test_supported_patch_versions_allow_path_fallback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for version in ((3, 12, 0), (3, 12, 15), (3, 12, 99)):
+                with self.subTest(version=version), patch.object(sys, 'version_info', version):
+                    self.assertEqual(runtime.interpreter(Path(temporary)), Path(sys.executable))
+
+    def test_selected_environment_rejects_unsupported_minor_versions(self):
+        with patch.object(runtime, 'interpreter', return_value=Path(sys.executable)), \
+                patch.object(os, 'execv') as execute:
+            for version in ((3, 11, 0), (3, 13, 0)):
+                with self.subTest(version=version), patch.object(sys, 'version_info', version):
+                    with self.assertRaisesRegex(SystemExit, 'Python 3.12 required; recreate .venv'):
+                        runtime.bootstrap(Path('/fictional-checkout'), ['--help'])
+            execute.assert_not_called()
+
+    def test_selected_supported_environment_continues_without_reexecution(self):
+        with patch.object(runtime, 'interpreter', return_value=Path(sys.executable)), \
+                patch.object(sys, 'version_info', (3, 12, 15)), patch.object(os, 'execv') as execute:
+            runtime.bootstrap(Path('/fictional-checkout'), ['--help'])
+            execute.assert_not_called()
+
+    def test_package_entrypoint_rejects_unsupported_python_before_dispatch(self):
+        from budget_tools import cli
+        with patch.object(cli, 'build_parser') as parser, patch.object(cli, 'StateStore') as state:
+            for version in ((3, 9, 6), (3, 10, 0), (3, 11, 0), (3, 13, 0), (4, 0, 0)):
+                with self.subTest(version=version), patch.object(sys, 'version_info', version):
+                    with self.assertRaisesRegex(SystemExit, 'Python 3.12 required'):
+                        cli.main(['--help'])
+            parser.assert_not_called()
+            state.assert_not_called()
 
     def test_runtime_link_to_unverified_storage_rejected_before_probe(self):
         with tempfile.TemporaryDirectory() as temporary:
