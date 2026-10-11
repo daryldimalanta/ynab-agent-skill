@@ -492,7 +492,7 @@ class RateLimitedReceiptTests(OfflineCase):
             def now(cls, tz=None):
                 return created + timedelta(hours=23, minutes=30, seconds=clock.now - start)
         self.reject_once(lambda args: args[0] == "PUT")
-        with patch("budget_tools.cli.datetime", FakeDatetime):
+        with patch("budget_tools.transaction_workflow.datetime", FakeDatetime):
             code, _, error = self.apply(draft)
         self.assertEqual(code, 1)
         self.assertIn("24 hours", error)

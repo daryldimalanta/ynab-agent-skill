@@ -8,14 +8,20 @@ This guide maps the current implementation (versioned in `budget_tools/__init__.
 
 ```text
 ynab-agent-skill/
-├── .python-version                  Local uv Python runtime requirement
+├── .python-version                  Preferred Python 3.12 environment
+├── pyproject.toml                   Package/version, dev tools and check scope
+├── uv.lock                          Locked project development dependencies
 ├── install.sh                       Installer and active skill synchronizer
 ├── bin/
 │   ├── ynab-agent-skill              Canonical executable launcher
 │   └── ynab-codex-skill              Compatibility command alias
 ├── budget_tools/                    Internal Python package
 │   ├── __init__.py                  Package version
-│   ├── cli.py                       Commands and workflow orchestration
+│   ├── cli.py                       Parser, output and command dispatch
+│   ├── transactions.py              Transaction reads, drafting and comparisons
+│   ├── transaction_workflow.py      Guarded execution and durable recovery
+│   ├── utils.py                     Resolvers and shared helpers
+│   ├── errors.py                    Shared command/workflow error
 │   ├── planning.py                  Monthly reads and guarded budget assignments
 │   ├── receipts.py                  Receipt proposal validation and normalization
 │   ├── api.py                       HTTP transport and YNAB resource methods
@@ -35,6 +41,11 @@ ynab-agent-skill/
 │   ├── checks.py                    Suite runner for validation/tests
 │   ├── consistency.py               Source manifest and doc-drift checks
 │   ├── quality.py                   Quality diagnostic and JSON reporter
+│   ├── runtime.py                   Local project interpreter selection
+│   ├── run.py                       Installer bootstrap
+│   ├── install_skill.py             Reviewed artifact staging and rollback
+│   ├── dev_checks.py                Lint, format and boundary typing checks
+│   ├── check_wheel.py               Exact wheel artifact audit
 │   ├── source_manifest.txt          Explicit distribution allowlist
 │   └── offline_guard/               Accidental access protection for tests
 ├── validation/                      Additional safety regressions and diagnostics
@@ -42,6 +53,9 @@ ynab-agent-skill/
 │   ├── test_post_implementation_safety.py
 │   ├── test_repair_safety.py
 │   ├── audit_mutation_checks.py
+│   ├── audit_new_payee_checks.py
+│   ├── audit_transaction_read_checks.py
+│   ├── mutation_support.py          Fault injection across lookup bindings
 │   ├── audit_budget_planning_checks.py
 │   ├── RECEIPT_ACCEPTANCE_CASES.md   Planned model evaluations, not completed tests
 │   └── BUDGET_ACCEPTANCE_CASES.md    Planned planning evaluations
@@ -54,7 +68,7 @@ ynab-agent-skill/
 └── .gitignore                       Excludes private/local artifacts
 ```
 
-The public command and skill share the name `ynab-agent-skill`. The legacy `ynab-codex-skill` command forwards to the canonical launcher; both use the same package, locks, credential lookup and private state. The Python package deliberately retains `budget_tools`. Credential lookup labels and the private-state directory also retain their existing names so a command rename does not strand credentials or pending recovery records. This checkout has no `pyproject.toml` or package installer: the launcher imports the adjacent package directly. The root [MIT license](LICENSE) covers the project; preserve the identical `LICENSE.txt` when distributing the skill folder separately.
+The public command and skill share the name `ynab-agent-skill`. The legacy `ynab-codex-skill` command forwards to the canonical launcher; both use the same package, locks, credential lookup and private state. The Python package deliberately retains `budget_tools`. Credential lookup labels and the private-state directory also retain their existing names so a command rename does not strand credentials or pending recovery records. The default launcher imports the adjacent package. `pyproject.toml` also supports a CLI-only wheel with an explicit `budget_tools` package allowlist and both console aliases; it excludes private artifacts and the separate host skill installations. The root [MIT license](LICENSE) covers the project; preserve the identical `LICENSE.txt` when distributing the skill folder separately.
 
 ## Responsibilities and dependencies
 
@@ -67,6 +81,9 @@ flowchart TD
     Proposal --> State[state.py: private file access]
     CLI --> State
     CLI --> Receipts[receipts.py: proposal validation]
+    CLI --> Workflow[transaction_workflow.py: guarded execution]
+    Workflow --> State
+    Workflow --> API
     CLI --> Planning[planning.py: budget review and execution]
     Planning --> State
     Planning --> API
@@ -79,22 +96,22 @@ These arrows show responsibility and data flow. `SKILL.md` is an instruction fil
 
 ### Launcher and package metadata
 
-[`bin/ynab-agent-skill`](bin/ynab-agent-skill) uses `env python3`, finds the checkout from its own resolved path, adds that root to Python's import path, and calls `budget_tools.cli.main()`. It disables bytecode-cache writes. The launcher and package must stay together; running it from another working directory is supported.
+[`bin/ynab-agent-skill`](bin/ynab-agent-skill) starts with `env python3`, finds its checkout from the launcher path, selects the verified local `.venv` when present (otherwise requiring Python 3.10+), adds the root to Python's import path, and calls `budget_tools.cli.main()`. It disables bytecode-cache writes. The launcher and package must stay together; running it from another working directory is supported.
 
 [`budget_tools/__init__.py`](budget_tools/__init__.py) declares `__version__`. The parser's version string and API user agent derive their versions from that single value.
 
 ### Command orchestration: `cli.py`
 
-[`budget_tools/cli.py`](budget_tools/cli.py) is the largest module. It contains command dispatch and transaction workflow logic. Budget workflow policy is in `planning.py`; the CLI routes budget drafts there before entering transaction-specific lock and recovery paths.
+[`budget_tools/cli.py`](budget_tools/cli.py) contains argument parsing, output and dispatch. Transaction reads/drafting are in `transactions.py`, shared resolution/helpers in `utils.py`, and execution policy in `transaction_workflow.py`. Budget execution policy is in `planning.py`. Both guarded interfaces accept injected clients and own applicable authorization and lock checks independently of CLI callers.
 
-| Area | Functions to start with | Responsibility |
+| Area and owner | Functions to start with | Responsibility |
 | --- | --- | --- |
 | Entry and arguments | `build_parser`, `main` | Parse arguments, dispatch commands, emit JSON results and error messages |
 | Setup and reads | `cmd_terms`, `cmd_auth`, `cmd_plans`, `cmd_accounts`, `cmd_categories`, `cmd_payees` | Notice acknowledgment, authentication checks, plan selection, resource listing |
-| Matching and resolution | `_transaction_query`, `_resolve_account`, `_resolve_category`, `_resolve_payee` | Request scoped records and resolve exact identifiers/names |
-| Draft construction | `cmd_transactions`, `_validated_receipt_proposal`, `_receipt_payload`, `_receipt_draft_shape`, `_draft_public` | Assess a proposal, construct the API payload, save the reviewable draft, and format the preview |
-| Apply and recovery | `cmd_drafts`, `_apply_draft_locked`, `_reconcile_draft_locked`, `_apply_receipt_approval_locked` | Enforce locks, confirmation, age, allowed states, writes, and recovery |
-| Verification | `_fingerprint`, `_transaction_invariants`, `_verification`, `_receipt_verification`, `_canonical_subtransactions` | Detect stale transactions and compare saved records with the intended result |
+| Matching (`transactions.py`) and resolution (`utils.py`) | `_transaction_query`, `_resolve_account`, `_resolve_category`, `_resolve_payee` | Request scoped records and resolve exact identifiers/names |
+| Draft construction (`transactions.py`, formatting in `utils.py`) | `cmd_transactions`, `_validated_receipt_proposal`, `_receipt_payload`, `_receipt_draft_shape`, `_draft_public` | Assess a proposal, construct the API payload, save the reviewable draft, and format the preview |
+| Apply and recovery (`transaction_workflow.py`; CLI dispatch only) | `execute`, `_apply_draft_locked`, `_reconcile_draft_locked`, `_apply_receipt_approval_locked` | Enforce locks, confirmation, age, allowed states, writes, and recovery |
+| Verification (`transactions.py`) | `_fingerprint`, `_transaction_invariants`, `_verification`, `_receipt_verification`, `_canonical_subtransactions` | Detect stale transactions and compare saved records with the intended result |
 
 `main(argv, store=...)` accepts an injected `StateStore` for isolated tests. Production `_client()` obtains a token through `keychain.py` and constructs `YnabClient`. Many tests replace `_client()`; API-contract tests instead provide the real client with an offline transport.
 
@@ -128,9 +145,9 @@ The origin is fixed to `https://api.ynab.com/v1`. Resource IDs are checked befor
 
 [`budget_tools/rate_limit.py`](budget_tools/rate_limit.py) provides persistent per-token rolling-window accounting. The CLI attaches it to every real client. It reserves and flushes a slot before each attempt, uses server usage headers to account conservatively for external callers, and persists cooldowns. A token SHA-256 digest identifies the ledger; the token, URLs, payloads and financial contents are never stored there. Short token-scoped locks protect accounting across processes and are released before sleeping/network I/O. Missing state starts a new ledger; unsafe or corrupt existing state fails closed. A backwards clock conservatively extends the wait.
 
-The transport returns status, body and response headers; injected legacy two-element responses remain supported. CLI write guards revalidate the transaction after a rate wait or 429, recheck age immediately before sending, and save `write_started`/`approval_started`. Definite 429 rejection checkpoints return to `pending`/`approval_pending` with `write_rate_limited`/`approval_rate_limited` stages. An interrupted attempt without a recorded definite rejection remains subject to reconciliation. Revalidation reads consume quota too; a reserved slot abandoned to refresh validation stays conservatively charged.
+The transport returns status, body and response headers; injected legacy two-element responses remain supported. Workflow write guards revalidate the transaction after a rate wait or 429, recheck age immediately before sending, and save `write_started`/`approval_started`. Definite 429 rejection checkpoints return to `pending`/`approval_pending` with `write_rate_limited`/`approval_rate_limited` stages. An interrupted attempt without a recorded definite rejection remains subject to reconciliation. Revalidation reads consume quota too; a reserved slot abandoned to refresh validation stays conservatively charged.
 
-The injected `transport` callable is the main testing seam for checking the real request-building code without connecting to YNAB. Client methods do not enforce user approval, draft expiry, or receipt rules; those belong to the CLI and skill workflow. Calling the client directly bypasses those checks.
+The injected `transport` callable is the main testing seam for checking the real request-building code without connecting to YNAB. Client methods do not enforce user approval, draft expiry, or receipt rules; those belong to the guarded execution modules and the skill. Calling the client directly bypasses those checks.
 
 ### Credential boundary: `keychain.py`
 
@@ -170,7 +187,7 @@ For a confirmed missing payee, `draft-receipt-create --new-payee` seals the exac
 4. A draft stores the reviewed payload, normalized proposal, before-state fingerprint/invariants, and summary. The agent presents those facts and obtains the user's approval of that specific draft.
 5. `drafts apply` loads and verifies the seal, checks confirmation/status/age, acquires locks, and rereads an existing target to reject changes since drafting. It persists `write_started` before sending a write.
 6. For conversion or creation, categorization is sent with `approved: false`. A known returned ID is persisted before readback. Saved fields and split lines must match the expected result.
-7. If approval was requested and categorization verifies, the CLI rereads the transaction, verifies it again, sends approval separately, then reads back and verifies the final result.
+7. If approval was requested and categorization verifies, the workflow rereads the transaction, verifies it again, sends approval separately, then reads back and verifies the final result.
 
 ```mermaid
 flowchart LR
@@ -196,7 +213,7 @@ This diagram summarizes the receipt conversion/creation path. Existing matching 
 | Normalized proposal | `validate_receipt_proposal()` | Resolved IDs, signed integer amounts, normalized evidence and currency precision |
 | Draft | CLI plus `StateStore.save_draft()` | ID, operation, plan/target, payload, before-state information, review seal, status/stage, and later recovery results |
 | API payload | `_receipt_payload()` or `_transaction_changes()` | Fields to submit to YNAB; evidence and the full local draft are not uploaded wholesale |
-| Verification result | CLI comparison helpers | `verified` boolean and field mismatches; receipt drafts distinguish categorization and approval checks |
+| Verification result | `transactions.py` comparison helpers | `verified` boolean and field mismatches; receipt drafts distinguish categorization and approval checks |
 
 Draft `status` expresses whether the operation is pending, in progress, uncertain, blocked, or complete. `stage` records the more specific checkpoint. They are related fields, not interchangeable names. Representative receipt states are:
 
@@ -213,7 +230,7 @@ Draft `status` expresses whether the operation is pending, in progress, uncertai
 
 The table is a guide to transaction workflows, not an exhaustive state-machine specification; the apply/reconcile functions contain the full branches. Transaction reconciliation requires a known transaction ID and never guesses one from amount alone. It can establish completion or return a receipt draft to `approval_pending`. Resume sends only the remaining receipt approval and enforces the same 24-hour expiry. Budget reconciliation instead uses its sealed month/category target, with no resume operation; its states are described in the budget planning section above.
 
-`cmd_drafts()` locks the draft and, for an existing known receipt/update target, the plan/transaction pair. That serializes local callers, including different drafts aimed at one transaction. A new creation has no target ID to lock before its first write, and these locks cannot coordinate with YNAB's UI or other API clients.
+`transaction_workflow.execute()` locks the draft and, for an existing known receipt/update target, the plan/transaction pair. That serializes local callers, including different drafts aimed at one transaction. A new creation has no target ID to lock before its first write, and these locks cannot coordinate with YNAB's UI or other API clients.
 
 ## Private files live outside the checkout
 
@@ -260,10 +277,10 @@ Run both unittest discovery commands and all four mutation diagnostics in [READM
 | Add/change a command | `cli.py`: `build_parser`, dispatch, relevant handler | Help text, README, and command behavior tests |
 | Change budget reads, assignments or recovery | `planning.py`, budget dispatch in `cli.py` | Monthly API contracts, budget tests, mutation checks, and budget skill reference |
 | Change receipt fields or arithmetic | `receipts.py` | Proposal reference, CLI normalization/payload use, receipt tests |
-| Change matching or category resolution | `cli.py`: query/resolver helpers | API-contract tests with independent filters and exact expected results |
+| Change matching or category resolution | `transactions.py`: query helpers; `utils.py`: resolvers | API-contract tests with independent filters and exact expected results |
 | Change an HTTP request or response assumption | `api.py` | Verify the relevant official contract; exercise the real client against the offline transport |
-| Change apply, approval, or recovery behavior | `cli.py`: locked workflow and verification helpers | Failure, stale-state, uncertain-write, and concurrency tests in both directories |
-| Change private storage or reviewed fields | `state.py` and draft construction in `cli.py` | Ownership/symlink/atomic-write tests, review-seal compatibility, recovery behavior |
+| Change apply, approval, or recovery behavior | `transaction_workflow.py`: guarded execute; `transactions.py`: comparisons | Failure, stale-state, uncertain-write, and concurrency tests in both directories |
+| Change private storage or reviewed fields | `state.py` and draft construction in `transactions.py` | Ownership/symlink/atomic-write tests, review-seal compatibility, recovery behavior |
 | Change how The agent interprets or reviews a receipt | `SKILL.md` and its proposal reference | Skill validation and separately observed interpretation evaluations |
 
 Use synthetic fixtures for development. Preserve exact expected categories, amounts, memos, and attempted-write counts where they matter; a balanced total alone cannot demonstrate a correct financial change. Documentation edits should be checked against the implementation and linked files without running live account commands.
@@ -272,4 +289,4 @@ Use synthetic fixtures for development. Preserve exact expected categories, amou
 
 `install.sh` delegates to `tools/install_skill.py`, which distributes one allowlisted skill to Codex and Antigravity IDE. Host UI metadata stays in `agents/openai.yaml`; financial behavior remains in the shared Python application. Staging, byte verification, private preference preservation, per-host recovery archives and caught-failure rollback protect updates. No app registration or live financial test is implied by file installation.
 
-`tools/quality.py` launches the same isolated offline suites for either host and records source-bound results. `tools/offline_guard/sitecustomize.py` propagates accidental-access restrictions to reviewed Python children. `tools/consistency.py` checks a bounded set of public contracts against an explicit source manifest. These tools do not replace semantic review, hostile-code isolation, model interpretation evaluations or a separately authorized live pilot. Broader packaging and transaction-workflow extraction remain proposed.
+`tools/quality.py` launches the same isolated offline suites for either host and records source-bound results. `tools/offline_guard/sitecustomize.py` propagates accidental-access restrictions to reviewed Python children. `tools/consistency.py` checks a bounded set of public contracts against an explicit source manifest. These tools do not replace semantic review, hostile-code isolation, model interpretation evaluations or a separately authorized live pilot. Guarded transaction execution and CLI-only wheel packaging are implemented. Transaction read/draft handlers still adapt argparse/output through `transactions.py`; further domain separation and strict typing of older modules remain future work. Development tools are separate from the offline financial gate; their checked scope is explicit, and wheel contents require a separate artifact audit.

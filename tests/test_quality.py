@@ -168,3 +168,123 @@ guard.check_path_safety("{protected_file}")
 '''
             result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_actual_guard_rejects_nested_links_and_keeps_original_home(self):
+        if not getattr(sys, '_ynab_offline_guard', False):
+            self.skipTest('Guard contract is exercised by tools.quality')
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            protected, scratch = base / 'protected', base / 'scratch'
+            protected.mkdir(); scratch.mkdir()
+            (protected / 'fictional.txt').write_text('fictional only')
+            (scratch / 'bridge').symlink_to(protected, target_is_directory=True)
+            (scratch / 'nested').symlink_to(scratch / 'bridge/fictional.txt')
+            (scratch / 'loop').symlink_to(scratch / 'loop')
+            code = '''
+import os, sys, sitecustomize
+from pathlib import Path
+assert sitecustomize.REAL_HOME == os.environ['YNAB_TEST_HOME']
+sitecustomize.REAL_HOME = sys.argv[1]
+sitecustomize.TEMP = sys.argv[2]
+sitecustomize.ROOT = sys.argv[1] + '/source'
+try:
+    os.listdir(sys.argv[1])
+except PermissionError:
+    pass
+else:
+    raise AssertionError('Protected ancestor directory enumeration allowed')
+for path in (sys.argv[1] + '/fictional.txt', sys.argv[2] + '/bridge/fictional.txt',
+             sys.argv[2] + '/nested', sys.argv[2] + '/loop'):
+    try:
+        Path(path).read_text()
+    except PermissionError:
+        continue
+    raise AssertionError('Actual audit hook permitted protected or linked access')
+'''
+            env = dict(os.environ, HOME=str(scratch))
+            result = subprocess.run([sys.executable, '-c', code, str(protected), str(scratch)],
+                                    env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_inventory_never_scans_linked_directory_and_rejects_report_suffix(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'source'; root.mkdir()
+            (root / 'tools').mkdir()
+            (root / 'tools/source_manifest.txt').write_text('tools/source_manifest.txt\n')
+            outside = Path(temporary) / 'outside'; outside.mkdir()
+            (root / 'budget_tools').symlink_to(outside, target_is_directory=True)
+            scanned = []
+            original = os.scandir
+            def tracked(path):
+                scanned.append(Path(path))
+                return original(path)
+            with patch('os.scandir', tracked):
+                with self.assertRaisesRegex(ValueError, 'linked'):
+                    consistency.files(root)
+            self.assertNotIn(root / 'budget_tools', scanned)
+            self.assertNotIn(outside, scanned)
+            (root / 'budget_tools').unlink(); (root / 'budget_tools').mkdir()
+            (root / 'budget_tools/new_REPORT.md').write_text('fictional guidance')
+            with self.assertRaisesRegex(ValueError, 'Unlisted source file'):
+                consistency.digest(root)
+
+    def test_designated_reference_unknown_group_and_malformed_commands_fail(self):
+        root = Path(__file__).absolute().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            copy = Path(temporary)
+            for name in consistency.files(root) + ['VALIDATION.md', 'PRIVACY_REVIEW.md']:
+                dest = copy / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(root / name, dest)
+            self.assertEqual(consistency.check(copy), [])
+            reference = copy / 'skills/ynab-agent-skill/references/budget-planning.md'
+            original = reference.read_text()
+            reference.write_text(original.replace('--assigned', '--nonexistent-review-flag'))
+            self.assertTrue(any('no longer parses' in e and 'budget-planning.md' in e
+                                for e in consistency.check(copy)))
+            reference.write_text(original)
+            readme = copy / 'README.md'; original = readme.read_text()
+            readme.write_text(original.replace('transactions list', 'transactons list'))
+            self.assertTrue(any('no longer parses' in e for e in consistency.check(copy)))
+            readme.write_text(original + '\n```ynab\ntransactions list --since "unterminated\n```\n')
+            self.assertTrue(any('Malformed documented command' in e for e in consistency.check(copy)))
+            readme.write_text(original + '\n```ynab\ntransactions list --since 2001-01-01\n')
+            self.assertTrue(any('Unclosed documented command' in e for e in consistency.check(copy)))
+
+    def test_inventory_rejects_unverified_child_mount_before_stat(self):
+        from tools.install_skill import InstallError, LocalPaths
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'tools').mkdir()
+            (root / 'tools/source_manifest.txt').write_text('tools/source_manifest.txt\n')
+            (root / 'budget_tools').mkdir()
+            original = LocalPaths.check
+            def local_only(safe, path):
+                if Path(path) == root / 'budget_tools':
+                    raise InstallError('Fictional unverified mount')
+                return original(safe, path)
+            from contextlib import contextmanager
+            stat_calls = []
+            original_scan = os.scandir
+            class Entry:
+                def __init__(self, entry):
+                    self.entry = entry
+                    self.name, self.path = entry.name, entry.path
+                def stat(self, **options):
+                    stat_calls.append(Path(self.path))
+                    return self.entry.stat(**options)
+            @contextmanager
+            def tracked_scan(path):
+                with original_scan(path) as entries:
+                    yield (Entry(entry) for entry in entries)
+            with patch.object(LocalPaths, 'check', local_only), patch('os.scandir', tracked_scan):
+                with self.assertRaisesRegex(ValueError, 'unsafe'):
+                    consistency.files(root)
+            self.assertNotIn(root / 'budget_tools', stat_calls)
+
+    def test_manifest_fifo_is_rejected_without_opening(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); (root / 'tools').mkdir()
+            os.mkfifo(root / 'tools/source_manifest.txt')
+            with self.assertRaisesRegex(ValueError, 'regular file'):
+                consistency.files(root)

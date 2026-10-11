@@ -14,9 +14,9 @@ from __future__ import annotations
 from contextlib import ExitStack, contextmanager
 from typing import Any, Iterator
 
-from budget_tools import cli, transactions, utils
+from budget_tools import cli, transactions, utils, transaction_workflow
 
-WORKFLOW_MODULES = (cli, transactions, utils)
+WORKFLOW_MODULES = (cli, transactions, utils, transaction_workflow)
 
 
 @contextmanager

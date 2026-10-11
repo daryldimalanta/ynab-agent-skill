@@ -51,7 +51,7 @@ class PatchEverywhereTests(unittest.TestCase):
     """Moved helpers must be replaced in every module that calls them."""
 
     def test_replaces_and_restores_every_binding(self):
-        from budget_tools import cli, transactions
+        from budget_tools import cli, transactions, transaction_workflow
         from validation.mutation_support import patch_everywhere
         original = transactions._receipt_verification
         self.assertIs(cli._receipt_verification, original)
@@ -59,8 +59,10 @@ class PatchEverywhereTests(unittest.TestCase):
         with patch_everywhere("_receipt_verification", marker):
             self.assertIs(cli._receipt_verification, marker)
             self.assertIs(transactions._receipt_verification, marker)
+            self.assertIs(transaction_workflow._receipt_verification, marker)
         self.assertIs(cli._receipt_verification, original)
         self.assertIs(transactions._receipt_verification, original)
+        self.assertIs(transaction_workflow._receipt_verification, original)
 
     def test_unknown_symbol_is_rejected(self):
         from validation.mutation_support import patch_everywhere

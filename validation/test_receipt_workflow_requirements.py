@@ -123,7 +123,7 @@ class WorkflowChecks(unittest.TestCase):
     def test_expired_draft_prevents_write(self):
         draft_id = self.update_draft('--memo', 'Synthetic')
         # Advance the clock instead of modifying immutable reviewed content.
-        with patch('budget_tools.cli.datetime', wraps=datetime) as clock:
+        with patch('budget_tools.transaction_workflow.datetime', wraps=datetime) as clock:
             clock.now.return_value = datetime.now(timezone.utc) + timedelta(hours=25)
             code, _, error = self.apply(draft_id)
         self.assertEqual(code, 1)

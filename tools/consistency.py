@@ -8,52 +8,62 @@ import re
 
 
 def files(root):
-    root = root.resolve()
-    names_text = (root / 'tools/source_manifest.txt').read_text()
-    names = names_text.splitlines()
+    import os
+    import stat
+    from tools.install_skill import LocalPaths, InstallError
+
+    try:
+        safe = LocalPaths()
+        root = safe.check(root)  # No resolve/stat/traversal before local verification.
+        names = safe.read(root / 'tools/source_manifest.txt').decode().splitlines()
+    except InstallError as exc:
+        raise ValueError(str(exc)) from exc
     if len(names) != len(set(names)):
         raise ValueError('Duplicate source manifest entry')
-    
-    # Establish actual files in public locations
-    actual_files = set()
-    for directory in ['.', 'bin', 'budget_tools', 'skills', 'tests', 'tools', 'validation']:
-        dir_path = root / directory
-        if not dir_path.is_dir():
-            continue
-        if directory == '.':
-            for p in dir_path.iterdir():
-                if p.is_file() and p.name not in {'.DS_Store'} and not p.name.endswith('.pyc'):
-                    actual_files.add(p.relative_to(root).as_posix())
-        else:
-            for p in dir_path.rglob('*'):
-                if p.is_file():
-                    if '.DS_Store' in p.parts or '__pycache__' in p.parts or p.name.endswith('.pyc'):
-                        continue
-                    actual_files.add(p.relative_to(root).as_posix())
-    
-    # Exclude generated reports if they are somehow placed in root
-    actual_files = {f for f in actual_files if not f.endswith('_REPORT.md') and f not in {'VALIDATION.md', 'PRIVACY_REVIEW.md'}}
-    
-    manifest_set = set(names)
-    omitted = actual_files - manifest_set
-    if omitted:
-        raise ValueError('Unlisted source file found: ' + sorted(omitted)[0])
-
     for name in names:
         path = Path(name)
         if path.is_absolute() or '..' in path.parts or not name or name.startswith('private/'):
             raise ValueError('Unsafe source manifest entry')
-        target = root / path
-        # Check parents up to root to avoid resolving outside bounds, but resolve tempdir links safely
-        if not target.is_file():
-            raise ValueError('Missing or linked manifest file: ' + name)
-        
-        # Verify no links inside the repository
-        current = target
-        while current != root:
-            if current.is_symlink():
-                raise ValueError('Missing or linked manifest file: ' + name)
-            current = current.parent
+
+    public_dirs = {'bin', 'budget_tools', 'skills', 'tests', 'tools', 'validation'}
+    excluded_dirs = {'.git', '.venv', 'venv', 'tmp', 'build', 'dist', '.ruff_cache', '.mypy_cache'}
+    actual_files = set()
+
+    def scan(directory, top=False):
+        # Entries are inspected lexically; no DirEntry.is_file default follows links.
+        safe.check(directory)
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                name = entry.name
+                try:
+                    safe.check(Path(entry.path))  # Verify child mount before even lstat.
+                except InstallError as exc:
+                    raise ValueError('Missing or linked/unsafe source entry: ' + name) from exc
+                info = entry.stat(follow_symlinks=False)
+                if stat.S_ISLNK(info.st_mode):
+                    raise ValueError('Missing or linked source entry: ' + name)
+                if name == '.DS_Store' or name == '__pycache__' or name.endswith('.pyc'):
+                    continue
+                if stat.S_ISDIR(info.st_mode):
+                    if top and (name in excluded_dirs or name.endswith('.egg-info')):
+                        continue
+                    if top and name not in public_dirs:
+                        raise ValueError('Unlisted source directory found: ' + name)
+                    scan(Path(entry.path))
+                elif stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
+                    actual_files.add(Path(entry.path).relative_to(root).as_posix())
+                else:
+                    raise ValueError('Expected an unlinked regular source file: ' + name)
+
+    scan(root, top=True)
+    # Only these dated generated root reports are excluded to avoid circular hashes.
+    actual_files -= {'VALIDATION.md', 'PRIVACY_REVIEW.md'}
+    omitted = actual_files - set(names)
+    if omitted:
+        raise ValueError('Unlisted source file found: ' + sorted(omitted)[0])
+    missing = set(names) - actual_files
+    if missing:
+        raise ValueError('Missing manifest file: ' + sorted(missing)[0])
 
     return names
 
@@ -95,43 +105,49 @@ def check(root):
             for target in re.findall(r'\]\(([^)]+)\)', (root / name).read_text()):
                 if '://' in target or target.startswith('#'):
                     continue
-                if not (root / name).parent.joinpath(target.split('#')[0]).is_file():
+                import os
+                destination = Path(os.path.abspath((root / name).parent / target.split('#')[0]))
+                if not destination.is_relative_to(root) or not destination.is_file():
                     errors.append('Broken link in ' + name + ': ' + target)
-    # Extract executable examples from documentation
+    # Designated CLI blocks are parser-checked everywhere, never executed.
+    import contextlib
+    import io
     import shlex
     parser = build_parser()
-    for doc_name in ['README.md', 'skills/ynab-agent-skill/SKILL.md']:
+    for doc_name in (name for name in names if name.endswith('.md')):
         text = (root / doc_name).read_text()
-        for block in re.findall(r'```(?:sh|text)\n(.*?)\n```', text, re.DOTALL):
+        blocks = re.findall(r'```ynab\n(.*?)\n```', text, re.DOTALL)
+        if len(blocks) != text.count('```ynab\n'):
+            errors.append('Unclosed documented command block in ' + doc_name)
+        for block in blocks:
             merged = []
             current = ''
-            for line in block.split('\n'):
+            for line in block.splitlines():
                 if line.endswith('\\'):
                     current += line[:-1] + ' '
                 else:
-                    current += line
-                    merged.append(current.strip())
+                    merged.append((current + line).strip())
                     current = ''
-            
-            for cmd in merged:
-                if not cmd or cmd.startswith('#') or cmd.startswith('PYTHONDONTWRITEBYTECODE') or cmd.startswith('python3'):
+            if current:
+                errors.append('Unfinished documented command in ' + doc_name)
+            for command in merged:
+                if not command or command.startswith('#'):
                     continue
                 try:
-                    tokens = shlex.split(cmd)
+                    tokens = shlex.split(command)
                 except ValueError:
+                    errors.append('Malformed documented command in ' + doc_name)
                     continue
-                if not tokens:
-                    continue
-                if tokens[0] == 'ynab-agent-skill':
+                if tokens and tokens[0] == 'ynab-agent-skill':
                     tokens = tokens[1:]
-                if not tokens or tokens[-1] == '...':
-                    continue
-                if tokens[0] in {'budgets', 'transactions', 'drafts', '--version'}:
-                    try:
-                        import contextlib, io
-                        with contextlib.redirect_stdout(io.StringIO()):
-                            parser.parse_args(tokens)
-                    except SystemExit as e:
-                        if e.code != 0:
-                            errors.append(f'Documented command in {doc_name} no longer parses: ' + ' '.join(tokens[:2]))
+                # A trailing ellipsis means optional extra flags, not an omitted
+                # required argument. Parse the remaining example in full.
+                if tokens and tokens[-1] == '...':
+                    tokens.pop()
+                try:
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        parser.parse_args(tokens)
+                except SystemExit as exc:
+                    if exc.code != 0:
+                        errors.append('Documented command in ' + doc_name + ' no longer parses: ' + ' '.join(tokens[:2]))
     return errors

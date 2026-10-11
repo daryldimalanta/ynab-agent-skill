@@ -99,7 +99,13 @@ def main():
                 result = {'passed': False, 'command': ['python3', '-B', '-m', module], 'exit_code': None, 'terminal_status': 'timed_out'}
             report['checks'].append(result)
             print('  ' + ('passed' if result['passed'] else 'FAILED'), flush=True)
-    report['status'] = 'passed' if all(r['passed'] for r in report['checks']) and before == digest(root) else 'failed'
+    try:
+        same_source = before == digest(root)
+    except ValueError:
+        same_source = False
+    report['status'] = 'passed' if all(r['passed'] for r in report['checks']) and same_source else 'failed'
+    if not same_source:
+        report['source_changed'] = True
     report['finished_at'] = datetime.now(timezone.utc).isoformat()
     # Fixed local output only, excluded from Git and the source digest.
     output = safe.check(root / 'tmp/quality')
@@ -115,4 +121,6 @@ def main():
 
 
 if __name__ == '__main__':
+    from tools.runtime import bootstrap
+    bootstrap(Path(__file__).absolute().parents[1], ['-B', '-m', 'tools.quality', *sys.argv[1:]])
     sys.exit(main())

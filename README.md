@@ -14,7 +14,17 @@ For a codebase walkthrough, read [Project structure and architecture](ARCHITECTU
 
 ## Local setup
 
-This checkout uses only the Python standard library at runtime. The launcher uses `python3` (Python 3.10+ required). Validation targets macOS with local APFS/HFS storage; Linux and Windows are not supported or tested. The tested interpreter and macOS version are recorded in the validation report.
+This checkout uses only the Python standard library at runtime and requires Python 3.10+. The application, installer and quality runner prefer this checkout's `.venv`; otherwise they require a supported `python3` on PATH. `.python-version` alone does not configure a system interpreter. The verified environment uses Python 3.12.15.
+
+For a fresh checkout, install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
+
+```sh
+uv sync --python 3.12 --locked --group dev
+```
+
+This creates a project-local environment and installs the locked development tools. It may download public Python/tool packages; it does not access YNAB. Subsequent application and test commands select that environment automatically, including when the system `python3` is too old. No system Python replacement is needed.
+
+Validation targets macOS with local APFS/HFS storage; Linux and Windows are not supported or tested. The tested interpreter and macOS version are recorded in the validation report.
 
 ### Installing the skill
 
@@ -26,14 +36,14 @@ The distributable skill is located at `skills/ynab-agent-skill`. To install it n
 ./install.sh both
 ```
 
-- **Prerequisites**: macOS, `bash`, Python 3.10+.
+- **Prerequisites**: macOS, `bash`, and the project environment above (or Python 3.10+ on PATH).
 - **Native installation locations**:
   - Codex: `~/.codex/skills/ynab-agent-skill`
   - Antigravity IDE: `~/.gemini/config/skills/ynab-agent-skill`
 - **What it does**: The installer copies the reviewed skill files. It preserves your existing private preferences (`references/local-preferences.md`) byte-for-byte across updates. If no preferences exist, it generates a minimal file pointing to the checkout's executable. It also handles legacy `ynab-codex-skill` migration to avoid duplicate active skills and creates safe backups in `~/.ynab-agent-skill-backups/`.
 - **Dry run**: Add `--dry-run` to preview changes without modifying the filesystem.
 
-**Note**: Installing the skill does not install a standalone application. The CLI and Python package (`budget_tools`) remain in this repository checkout. The installed skill finds the local executable via the `local-preferences.md` file generated during installation, or by searching your PATH. Native skill discovery by the host app may require a fresh session or reload. The installer verifies each installed public file and private preference bytes. Each host update is staged and verified before replacement. The installer keeps separate unique backups per host and restores both prior installations on a caught update failure. A process kill or power loss can require manual restoration from those backups. Only the seven explicitly listed public skill files are distributed; extra source files are excluded. Unknown or linked storage paths are rejected. It does not run a live financial workflow test.
+**Note**: Installing the skill does not install a standalone application. The default CLI and Python package (`budget_tools`) remain in this repository checkout; an optional CLI wheel is described below. The installed skill finds the local executable via the `local-preferences.md` file generated during installation, or by searching your PATH. Native skill discovery by the host app may require a fresh session or reload. The installer verifies each installed public file and private preference bytes. Each host update is staged and verified before replacement. The installer keeps separate unique backups per host and restores both prior installations on a caught update failure. A process kill or power loss can require manual restoration from those backups. Only the seven explicitly listed public skill files are distributed; extra source files are excluded. Unknown or linked storage paths are rejected. It does not run a live financial workflow test.
 
 ### Using the CLI directly
 
@@ -76,7 +86,7 @@ The repository's public source, local runtime data, and the agent conversation a
 
 For a report that needs category allocations and full memos, request bulk details:
 
-```sh
+```ynab
 ynab-agent-skill transactions list --since 2026-01-01 --until 2026-01-31 --include-splits
 ```
 
@@ -88,7 +98,7 @@ Date/account/type/amount filters still select parent transactions. `--limit` lim
 
 Version 0.7.0 adds monthly budget reads and reviewed category assignments. After completing the setup and selecting the exact plan, prefix these examples with `ynab-agent-skill`:
 
-```text
+```ynab
 budgets months
 budgets get 2001-02
 budgets get 2001-02 --category "Example Group A: Example Category A"
@@ -127,7 +137,7 @@ Existing split lines cannot be rewritten by this implementation. When assessment
 
 Only for an explicit request to create a new transaction:
 
-```sh
+```ynab
 ynab-agent-skill transactions draft-receipt-create --account ACCOUNT --payee PAYEE \
   --date YYYY-MM-DD --outflow AMOUNT --proposal PRIVATE_JSON_PATH
 ```
@@ -144,7 +154,7 @@ A known created ID is saved before readback. If the creation response is lost wi
 
 For updates or creations without a full receipt or proposal, use the generic commands:
 
-```sh
+```ynab
 ynab-agent-skill transactions draft-create --account ACCOUNT --date YYYY-MM-DD \
   --outflow AMOUNT --payee PAYEE --category CATEGORY --memo "Optional memo"
 ynab-agent-skill transactions draft-update TRANSACTION_ID --category CATEGORY
@@ -179,20 +189,35 @@ python3 -B -m tools.quality full
 
 `quick` runs source consistency and both ordinary suites. `full` also runs all four mutation diagnostics. The runner uses synthetic temporary state and a Python guard inherited by child processes; it blocks accidental network, Keychain, existing home-file and private application-state access. Installer subprocesses are restricted to synthetic homes. This is a guard for reviewed Python tests, not an operating-system sandbox against hostile or native code. Reports go only to ignored `tmp/quality/`, with source revision/digest, interpreter/platform, commands, exit status and structured results; raw test output and private values are excluded. Confirm a saved report still matches the source with `python3 -B -m tools.quality full --check-report tmp/quality/REPORT.json`. A quick report cannot satisfy a full-report check.
 
-Maintain `tools/source_manifest.txt` when adding source or instruction files. The checker verifies the installer allowlist, canonical version, standalone license, discovery metadata, selected CLI shapes and current-document file links. It does not validate every prose claim or replace model interpretation evaluations. Historical reports are excluded from the source digest.
+Maintain `tools/source_manifest.txt` when adding source or instruction files. Every public source directory is scanned without following links; only explicitly named generated reports and build/cache directories are excluded. Use `ynab` fenced blocks for parser-checked CLI examples in README, skill and references; placeholders are parsed as arguments, trailing `...` denotes optional additional flags, and unknown commands or malformed quoting fail the check. Examples are never executed. The checker verifies the installer allowlist, canonical version, standalone license, discovery metadata, selected CLI shapes and current-document file links. It does not validate every prose claim or replace model interpretation evaluations. Historical reports are excluded from the source digest.
 
-For focused development, the underlying commands are listed below; these alone do not activate the offline guard:
+For focused development, explicitly use `.venv/bin/python` with the underlying commands below; these alone do not activate the offline guard:
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -q
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s validation -q
-PYTHONDONTWRITEBYTECODE=1 python3 -m validation.audit_mutation_checks
-PYTHONDONTWRITEBYTECODE=1 python3 -m validation.audit_new_payee_checks
-PYTHONDONTWRITEBYTECODE=1 python3 -m validation.audit_transaction_read_checks
-PYTHONDONTWRITEBYTECODE=1 python3 -m validation.audit_budget_planning_checks
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -q
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s validation -q
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m validation.audit_mutation_checks
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m validation.audit_new_payee_checks
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m validation.audit_transaction_read_checks
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m validation.audit_budget_planning_checks
 ```
 
 Fixtures are synthetic. Both test directories must be run. The general mutation diagnostic injects seven faults in memory; the new-payee diagnostic injects four, the transaction-read diagnostic injects ten, and the budget-planning diagnostic injects seven. All require a passing unmodified control and exit nonzero for missed faults or test errors. Assertion failures from an exercised fault are detection evidence, not normal regressions; loader/fixture errors do not count. The [receipt acceptance checklist](validation/RECEIPT_ACCEPTANCE_CASES.md) and [budget acceptance checklist](validation/BUDGET_ACCEPTANCE_CASES.md) are separate from automated tests. No live integration test is run automatically.
+
+## Developer checks and packaging
+
+Run `python3 -B -m tools.dev_checks` after environment setup. It applies correctness lint to all Python sources, formatting checks to the new workflow/tool modules, and strict typing to the transaction execution boundary and shared errors. The scope is explicit in `pyproject.toml` and `tools/dev_checks.py`; this does not claim the older modules have been fully formatted or strictly typed.
+
+The supported library execution interface is `budget_tools.transaction_workflow.execute(store, draft_id, client_factory=..., command="apply", confirm=draft_id)`. It owns terms, sealed intent, draft/target locks, status, expiry, stale-state checks, durable progress, readback and recovery. Use `command="reconcile"` for API reads only or `command="resume"` for remaining receipt approval only. The CLI delegates to it. Private helpers ending `_locked` are not supported entry points. Confirmation remains an operator assertion; it does not authenticate human approval. Monthly assignments use `budget_tools.planning.execute`.
+
+An optional wheel packages the CLI and `budget_tools` only; the skill still uses the reviewed folder installer. Build and inspect it locally:
+
+```sh
+uv build --wheel --out-dir /private/tmp/ynab-public-wheel
+.venv/bin/python -B -m tools.check_wheel /private/tmp/ynab-public-wheel/ynab_agent_skill-0.7.0-py3-none-any.whl
+```
+
+Replace the filename with the version reported by the build. `pyproject.toml` derives it from `budget_tools/__init__.py`. The checker rejects extra/missing files and requires exact package source bytes, license, metadata and both command aliases. Private state, preferences, tests, handoffs, receipts and host installations are excluded. Installing a wheel into a separate virtual environment does not migrate credentials, state, host preferences or executable locations. Inspect the exact artifact again after source changes; no build command publishes it. Only macOS behavior has been verified even though Python wheel metadata uses a generic platform tag.
 
 ## Distribution status
 

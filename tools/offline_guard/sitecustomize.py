@@ -12,7 +12,7 @@ import sys
 ROOT = os.environ.get('YNAB_TEST_SOURCE')
 TEMP = os.environ.get('YNAB_TEST_TEMP')
 if ROOT and TEMP:
-    REAL_HOME = os.path.expanduser('~')
+    REAL_HOME = os.environ.setdefault('YNAB_TEST_HOME', os.path.expanduser('~'))
     PYTHONPATH = os.environ.get('PYTHONPATH')
     EXECUTABLE = os.path.realpath(sys.executable)
     sys.dont_write_bytecode = True
@@ -34,16 +34,17 @@ if ROOT and TEMP:
         path_str = os.path.abspath(os.fsdecode(path_str))
         current = "/"
         for part in path_str.strip("/").split("/"):
-            if not part: continue
+            if not part:
+                continue
             current = os.path.join(current, part)
             _enforce_rules(current)
-            # Limit symlink chains to avoid infinite loops in hostile structures
-            chain_depth = 0
-            while os.path.islink(current) and chain_depth < 40:
-                chain_depth += 1
+            # Reject before following: even a wholly local link can contain a
+            # second linked ancestor. Only fixed macOS system aliases are used.
+            if os.path.islink(current):
                 target = os.readlink(current)
-                if not os.path.isabs(target):
-                    target = os.path.normpath(os.path.join(os.path.dirname(current), target))
+                aliases = {"/tmp": "/private/tmp", "/var": "/private/var"}
+                if aliases.get(current) != target:
+                    raise PermissionError('Offline checks forbid linked path components')
                 _enforce_rules(target)
                 current = target
 
@@ -54,6 +55,18 @@ if ROOT and TEMP:
             path = args[0]
             if isinstance(path, (str, bytes, os.PathLike)):
                 check_path_safety(path)
+                absolute = os.path.abspath(os.fsdecode(path))
+                if within(absolute, REAL_HOME):
+                    if not any(within(absolute, root) for root in (ROOT, TEMP, sys.base_prefix)):
+                        raise PermissionError('Offline checks forbid private file or directory access')
+        if event == 'os.exec':
+            executable, command, env = args
+            child = os.environ if env is None else env
+            if (os.fsdecode(executable) == ROOT + '/.venv/bin/python'
+                    and list(command[1:3]) == ['-B', ROOT + '/tools/run.py']
+                    and all(child.get(k) == os.environ.get(k) for k in
+                            ('PYTHONPATH', 'YNAB_TEST_SOURCE', 'YNAB_TEST_TEMP', 'YNAB_TEST_HOME'))):
+                return  # Reviewed installer bootstrap preserves the audit guard.
         if event in {'os.system', 'os.posix_spawn', 'os.exec', 'os.fork'}:
             raise PermissionError('Unexpected offline process launch')
         if event == 'subprocess.Popen':

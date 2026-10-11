@@ -5,7 +5,7 @@
 
 Handlers here prepare reviewed drafts and compare authoritative readback with
 reviewed intent. They never apply writes; locked application and recovery stay
-in ``cli.py`` so every write path shares one approval and lock policy.
+in ``transaction_workflow.py`` so CLI and library callers share one policy.
 """
 
 from __future__ import annotations

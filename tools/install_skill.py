@@ -58,11 +58,17 @@ class LocalPaths:
 
     def read(self, path):
         path = self.check(path)
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise InstallError('Unsafe to proceed: expected an unlinked regular file')
+        # Reject special files before opening. Hostile same-user replacement
+        # races are outside this local installer's boundary.
         with path.open('rb') as stream:
             info = os.fstat(stream.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise InstallError('Unsafe to proceed: expected an unlinked regular file')
             return stream.read()
+
 
 
 def _write(path, data):

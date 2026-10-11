@@ -6,7 +6,7 @@ Use CLI 0.7.0 or later after the skill's terms, authentication, and exact-plan c
 
 Prefix these examples with the configured `ynab-agent-skill` executable:
 
-```text
+```ynab
 budgets months
 budgets get 2001-02
 budgets get 2001-02 --category "Example Group A: Example Category A"
@@ -24,7 +24,7 @@ Translate structured output into a readable table with Category, Assigned, Activ
 
 ## Prepare and review assignments
 
-```text
+```ynab
 budgets draft-assign 2001-02 --category "Example Group A: Example Category A" --assigned 81.25
 budgets draft-assign 2001-02 --category CATEGORY_ID --increase 17.25
 budgets draft-assign 2001-02 --category CATEGORY_ID --decrease 17.25
@@ -36,7 +36,7 @@ Present the draft ID, exact plan, month, category/group, current assignment, pro
 
 Wait for explicit approval of that concrete draft. Then use its returned command:
 
-```text
+```ynab
 drafts apply DRAFT_ID --confirm DRAFT_ID
 ```
 

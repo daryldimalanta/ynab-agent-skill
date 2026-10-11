@@ -18,6 +18,8 @@ ynab-agent-skill
 
 Use an explicitly configured local executable if supplied by the user or private preferences; otherwise locate it with `command -v ynab-agent-skill`. Check its `--version`. If it is absent and no checkout is known, ask for the local checkout location and use its quoted absolute `bin/ynab-agent-skill` path. Do not search unrelated storage or fall back to an older command. Prefix the command fragments below with this executable. The legacy `ynab-codex-skill` command is a compatibility alias when provided by the same reviewed checkout; do not infer that an unrelated older installation is current.
 
+The checkout launcher selects its project `.venv` when present and otherwise requires Python 3.10+. If it reports an unsupported runtime, follow the known checkout README setup; do not replace credentials or private state to repair Python.
+
 Use the CLI instead of direct API, SDK, or Keychain calls. Never request, reveal, print, export, or log the access token. Keep receipt images and proposal files local and disclose only the fields needed for review. Follow the user's storage and external-transmission restrictions; installation does not grant access to additional storage or services.
 
 ## Rate limits and long runs
@@ -64,7 +66,7 @@ Preserve the complete transaction ID returned by YNAB. Posted transactions origi
 
 Use explicit inclusive date bounds, an exact account, and an exact amount:
 
-```text
+```ynab
 transactions match --since YYYY-MM-DD --until YYYY-MM-DD --account ACCOUNT --outflow AMOUNT
 ```
 
@@ -118,7 +120,7 @@ Application verifies the exact new-payee name and its API-assigned ID before app
 
 When you need to make a simple update or create a simple transaction without dealing with receipt components, proposals, or splits, use the generic commands:
 
-```text
+```ynab
 transactions draft-create --account ACCOUNT --date YYYY-MM-DD --outflow AMOUNT ...
 transactions draft-update TRANSACTION_ID --category CATEGORY --memo "Updated memo"
 ```
@@ -131,7 +133,7 @@ If an existing transaction has the wrong payee and you need to assign a new, non
 
 All writes remain draft-first. Present the concrete draft's transaction, receipt evidence, parent memo, split categories, amounts, per-category memos, and approval intent. Apply only after the user explicitly approves that draft:
 
-```text
+```ynab
 drafts apply DRAFT_ID --confirm DRAFT_ID
 ```
 

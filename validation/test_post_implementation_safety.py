@@ -204,7 +204,7 @@ class WorkflowAcceptance(OfflineCase):
         self.assertEqual(self.run_cli("drafts", "reconcile", draft_id)[0], 0)
         self.client.reject_approval = False
         count = len(self.client.writes)
-        with patch("budget_tools.cli.datetime", wraps=datetime) as clock:
+        with patch("budget_tools.transaction_workflow.datetime", wraps=datetime) as clock:
             clock.now.return_value = datetime.now(timezone.utc) + timedelta(hours=25)
             code, _, error = self.run_cli("drafts", "resume", draft_id, "--confirm", draft_id)
         self.assertEqual(len(self.client.writes), count, "Expired drafts must not send a resumed write")

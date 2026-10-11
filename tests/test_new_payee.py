@@ -371,7 +371,7 @@ class NewPayeeTests(OfflineCase):
 
     def test_expired_draft_never_creates_payee(self):
         draft_id = self.draft_id()
-        with patch("budget_tools.cli.datetime", wraps=datetime) as clock:
+        with patch("budget_tools.transaction_workflow.datetime", wraps=datetime) as clock:
             clock.now.return_value = datetime.now(timezone.utc) + timedelta(hours=25)
             self.assertEqual(self.apply(draft_id)[0], 1)
         self.assertEqual(self.server.writes(), [])
@@ -415,7 +415,7 @@ class NewPayeeTests(OfflineCase):
             def now(cls, tz=None):
                 return created + timedelta(hours=23, minutes=30, seconds=clock.now - start)
         self.reject_once(lambda args: args[0] == "POST")
-        with patch("budget_tools.cli.datetime", FakeDatetime):
+        with patch("budget_tools.transaction_workflow.datetime", FakeDatetime):
             self.assertEqual(self.apply(draft_id)[0], 1)
         self.assertEqual(self.server.writes(), [])
 
