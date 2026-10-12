@@ -272,6 +272,25 @@ def _draft_public(draft: dict[str, Any]) -> dict[str, Any]:
         "changes": draft.get("changes"),
         "apply_command": f"ynab-agent-skill drafts apply {draft.get('id')} --confirm {draft.get('id')}",
     }
+    if draft.get("workflow") == "deletion_restore":
+        result["restoration_review"] = {
+            "original_transaction": draft.get("before_detail"),
+            "new_transaction_payload": draft.get("payload"),
+            "warning": draft.get("summary", {}).get("warning"),
+        }
+    if draft.get("operation") == "delete":
+        result["deletion_review"] = {
+            "transaction": draft.get("before_detail"),
+            "reason": draft.get("proposal", {}).get("reason"),
+            "delete_entire_transaction": True,
+            "includes_all_split_rows": True,
+            "irreversible": True,
+            "protected_states": draft.get("proposal", {}).get("protected_states", []),
+            "warning": "Deletes this entire transaction and ALL split rows; can change balances and reconciliation.",
+        }
+        if draft.get("proposal", {}).get("protected_states"):
+            result["apply_command"] += f" --confirm-protected {draft.get('transaction_id')}"
+        result["verification"] = draft.get("verification")
     if draft.get("operation") == "budget_assign":
         result["budget_review"] = draft.get("proposal")
         result["verification"] = draft.get("verification")

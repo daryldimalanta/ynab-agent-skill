@@ -64,3 +64,5 @@ tools/check_wheel.py
 tests/test_packaging.py
 tools/dev_checks.py
 tests/test_runtime.py
+budget_tools/deletion.py
+tests/test_deletion.py

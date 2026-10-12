@@ -162,6 +162,38 @@ ynab-agent-skill transactions draft-update TRANSACTION_ID --category CATEGORY
 
 These generic commands skip the receipt-assessment conversion path. You can edit specific fields (e.g., `--memo`, `--clear-memo`, `--category`, `--uncategorized`) for an existing transaction without affecting others. To fix an unknown merchant, use `--new-payee "CONFIRMED NAME"` to create the missing payee and assign that transaction to it (this does not rename a shared payee record). As always, changes must be reviewed as a local draft before being applied with `drafts apply`.
 
+## Guarded transaction deletion and restoration
+
+To safely remove provisional or user-selected transactions, draft deletion with an explicit reason and account:
+
+```ynab
+ynab-agent-skill transactions draft-delete TRANSACTION_ID --account ACCOUNT --reason "Explicit reason"
+ynab-agent-skill drafts apply DRAFT_ID --confirm DRAFT_ID
+```
+
+Deletion removes the entire transaction and all of its split rows. Transfer transactions and transfer split rows cannot be deleted.
+
+Transactions in protected states (approved, cleared, reconciled, bank-imported, or matched) fail closed by default. Drafting an exception requires `--allow-protected`, and applying that draft requires both `--confirm DRAFT_ID` and `--confirm-protected TRANSACTION_ID`:
+
+```ynab
+ynab-agent-skill transactions draft-delete TRANSACTION_ID --account ACCOUNT --reason "Explicit reason" --allow-protected
+ynab-agent-skill drafts apply DRAFT_ID --confirm DRAFT_ID --confirm-protected TRANSACTION_ID
+```
+
+All deletion attempts are journaled to private `deletion-history.md`. To inspect or locate this log without API access:
+
+```ynab
+ynab-agent-skill drafts deletion-history
+```
+
+If an attempted deletion was verified, a replacement can be manually drafted from historical state:
+
+```ynab
+ynab-agent-skill transactions draft-restore-deletion DELETION_DRAFT_ID
+```
+
+Restoration checks for duplicate candidates before drafting and rechecks them on application. It creates a new manual transaction in uncleared and unapproved status; bank import links and reconciliation history cannot be restored.
+
 ## Arithmetic, recovery, and limits
 
 The CLI tracks YNAB's 200-request rolling hour in private, token-specific state shared across local processes. It reserves capacity before sending, incorporates response usage headers, and automatically waits/retries confirmed HTTP 429 rejections for as many hours as needed. A valid `Retry-After` is honored; otherwise the cooldown is one hour plus a small margin. Wait notices go to stderr and sleeps are interruptible. Other applications using the same token may consume unobserved capacity, so an initial 429 remains possible. See [long-running work and recovery](skills/ynab-agent-skill/references/long-runs.md) for batch checkpoints and restart instructions.
@@ -171,7 +203,7 @@ Delayed mutations revalidate the target and check draft expiry before sending. A
 - Exact decimal strings, currency precision, 500-character parent/line memos, category totals, and required evidence are checked locally. Omitted/null parent memo preserves it; an empty string clears it.
 - Discounts, tax, tips, and returns may be signed components. Their net, supplied tender, and allocations must each match the receipt total. Arithmetic cannot prove category or tax attribution; unresolved evidence blocks drafting.
 - Ordinary outflows and pure refunds are supported. Allocation magnitudes inherit the transaction's sign. Mixed-sign category allocations and multiple tenders are blocked. Do not omit known payments to pass validation.
-- Hidden/deleted/internal categories and groups, Credit Card Payment transaction categorization, receipt transfers, and pending bank transactions absent from the API are unsupported. Active Credit Card Payment budget assignments are supported. Deletion is not exposed.
+- Hidden/deleted/internal categories and groups, Credit Card Payment transaction categorization, receipt transfers, and pending bank transactions absent from the API are unsupported. Active Credit Card Payment budget assignments are supported. Deletion is guarded by immutable drafts and readback verification; transfers cannot be deleted.
 - Apply and resume enforce a 24-hour expiry. Reviewed fields are sealed against accidental changes, not a malicious same-user process replacing both data and checksum.
 - `drafts reconcile ID` only reads API state. `drafts resume ID --confirm ID` can send remaining approval when the existing draft is valid and still authorized; it does not repeat conversion or creation.
 - Old unsealed drafts need reassessment. Never automatically replace an uncertain creation or edit private JSON to bypass recovery checks.
@@ -214,7 +246,7 @@ An optional wheel packages the CLI and `budget_tools` only; the skill still uses
 
 ```sh
 uv build --wheel --out-dir /private/tmp/ynab-public-wheel
-.venv/bin/python -B -m tools.check_wheel /private/tmp/ynab-public-wheel/ynab_agent_skill-0.7.0-py3-none-any.whl
+.venv/bin/python -B -m tools.check_wheel /private/tmp/ynab-public-wheel/ynab_agent_skill-0.8.0-py3-none-any.whl
 ```
 
 Replace the filename with the version reported by the build. `pyproject.toml` derives it from `budget_tools/__init__.py`. The checker rejects extra/missing files and requires exact package source bytes, license, metadata and both command aliases. Private state, preferences, tests, handoffs, receipts and host installations are excluded. Installing a wheel into a separate virtual environment does not migrate credentials, state, host preferences or executable locations. Inspect the exact artifact again after source changes; no build command publishes it. Only macOS behavior has been verified even though Python wheel metadata uses a generic platform tag.

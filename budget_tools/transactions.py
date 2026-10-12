@@ -400,6 +400,20 @@ def cmd_transactions(args: argparse.Namespace, store: StateStore) -> None:
         utils._json_output(utils._draft_public(draft))
         return
 
+    if command == "draft-restore-deletion":
+        from budget_tools import deletion
+        draft = deletion.create_restoration_draft(client, store, args.deletion_draft_id)
+        utils._json_output(utils._draft_public(draft))
+        return
+
+    if command == "draft-delete":
+        from budget_tools import deletion
+        account = _resolve_account(client, plan_id, args.account)
+        draft = deletion.create_draft(client, store, args.transaction_id, account["id"], args.reason,
+                                      allow_protected=args.allow_protected)
+        utils._json_output(utils._draft_public(draft))
+        return
+
     if command == "draft-update":
         current = client.get_transaction(plan_id, args.transaction_id)
         changes, labels = _transaction_changes(args, client, plan_id)

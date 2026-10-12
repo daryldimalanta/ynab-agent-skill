@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterator
 
+from budget_tools import deletion
 from budget_tools.api import ApiError, YnabClient
 from budget_tools.errors import CliError
 from budget_tools.state import StateStore
@@ -49,11 +50,26 @@ def _write_guard(
         yield
 
 
+def _expected_verification(draft: dict[str, Any], saved: dict[str, Any]) -> dict[str, Any]:
+    expected = _generic_expected(draft)
+    if (
+        draft.get("workflow") == "deletion_restore"
+        and expected.get("category_id") is None
+        and saved.get("category_name") == "Split"
+        and isinstance(saved.get("category_id"), str)
+        and saved["category_id"]
+        and isinstance(saved.get("subtransactions"), list)
+        and saved["subtransactions"]
+    ):
+        expected["category_id"] = saved["category_id"]
+    return _verification(expected, saved)
+
+
 def _finish_verification(
     draft: dict[str, Any], saved: dict[str, Any], store: StateStore
 ) -> dict[str, Any]:
     _record_created_payee(draft, saved)
-    check = _verification(_generic_expected(draft), saved)
+    check = _expected_verification(draft, saved)
     draft["status"] = "applied" if check["verified"] else "applied_with_warning"
     draft["stage"] = "verified" if check["verified"] else "verification_warning"
     draft["apply_finished_at"] = store.now()
@@ -61,6 +77,17 @@ def _finish_verification(
     draft["after_summary"] = _transaction_summary(saved)
     draft["verification"] = check
     store.save_draft(draft)
+    if draft.get("workflow") == "deletion_restore":
+        store.append_deletion_history(
+            {
+                "at": store.now(),
+                "event": "restoration_readback",
+                "restoration_draft_id": draft["id"],
+                "deletion_draft_id": draft["proposal"]["deletion_draft_id"],
+                "new_transaction_id": draft.get("transaction_id"),
+                "verification": check,
+            }
+        )
     store.append_audit(
         {
             "at": store.now(),
@@ -266,6 +293,10 @@ def _apply_draft_locked(
         new_payee_name = _new_payee_name(draft)
         if new_payee_name is not None:
             _require_missing_payee(client, plan_id, new_payee_name)
+        if draft.get("workflow") == "deletion_restore":
+            deletion.revalidate_restoration(client, store, draft)
+        if draft["operation"] == "delete":
+            deletion.revalidate(client, store, draft)
         if draft["operation"] in {"update", "receipt_split", "receipt_approval"}:
             if not isinstance(draft.get("before_invariants"), dict):
                 raise CliError("Legacy draft lacks verification invariants; create a fresh draft")
@@ -291,6 +322,8 @@ def _apply_draft_locked(
         draft["stage"] = "write_started"
         draft["apply_started_at"] = store.now()
         store.save_draft(draft)
+        if draft["operation"] == "delete":
+            deletion.record_history(store, draft, "intent_saved")
 
     def rate_limited() -> None:
         draft["status"] = "pending"
@@ -305,6 +338,8 @@ def _apply_draft_locked(
                 response = client.update_transaction(
                     plan_id, draft["transaction_id"], draft["payload"]
                 )
+            elif draft["operation"] == "delete":
+                response = client.delete_transaction(plan_id, draft["transaction_id"])
             else:
                 raise CliError("Unsupported draft operation")
     except ApiError as exc:
@@ -320,7 +355,24 @@ def _apply_draft_locked(
             "detail": exc.detail,
         }
         store.save_draft(draft)
+        if draft["operation"] == "delete":
+            deletion.record_history(store, draft, draft["stage"])
         raise
+
+    if draft["operation"] == "delete":
+        draft["status"] = "verification_pending"
+        draft["stage"] = "delete_acknowledged"
+        draft["write_acknowledged_at"] = store.now()
+        store.save_draft(draft)
+        acknowledged = _extract_saved_transaction(response)
+        if acknowledged is not None and acknowledged.get("id") != draft["transaction_id"]:
+            draft["status"] = "uncertain"
+            draft["stage"] = "write_acknowledged_wrong_id"
+            store.save_draft(draft)
+            raise CliError(
+                "Deletion returned a different transaction id; reconcile the original target"
+            )
+        return deletion.finish(draft, deletion.readback(client, draft), store)
 
     saved = _extract_saved_transaction(response)
     if saved is None:
@@ -386,6 +438,26 @@ def _reconcile_draft_locked(
         raise CliError(
             "This draft has no known transaction id; reconcile it using independent evidence"
         )
+    if draft.get("operation") == "delete":
+        if draft.get("stage") not in {
+            "write_started",
+            "write_uncertain",
+            "write_rejected",
+            "delete_acknowledged",
+            "write_acknowledged_wrong_id",
+            "verified_deletion",
+            "deletion_not_verified",
+        }:
+            raise CliError("Deletion has no recorded attempt to reconcile")
+        check = deletion.readback(client, draft)
+        if not check["verified"]:
+            draft["reconciliation"] = check
+            draft["last_reconciled_at"] = store.now()
+            store.save_draft(draft)
+            raise CliError(
+                "The transaction is still present; deletion is not verified; do not replay"
+            )
+        return deletion.finish(draft, check, store)
     saved = client.get_transaction(draft["plan_id"], transaction_id)
     if draft.get("operation") in {"receipt_split", "receipt_approval", "receipt_create"}:
         categorization = _receipt_verification(draft, saved, approved=None)
@@ -407,7 +479,7 @@ def _reconcile_draft_locked(
             store,
             approved=bool(draft["proposal"]["approve_after_verification"]),
         )
-    check = _verification(_generic_expected(draft), saved)
+    check = _expected_verification(draft, saved)
     if draft.get("stage") == "write_uncertain" and not check["verified"]:
         draft["last_reconciled_at"] = store.now()
         draft["reconciliation"] = check
@@ -423,6 +495,7 @@ def execute(
     client_factory: Callable[[], YnabClient],
     command: str = "apply",
     confirm: str | None = None,
+    confirm_protected: str | None = None,
 ) -> dict[str, Any]:
     """Apply once, reconcile with reads only, or resume receipt approval only.
 
@@ -438,6 +511,7 @@ def execute(
         draft = store.load_draft(draft_id)
         if draft.get("operation") not in {
             "create",
+            "delete",
             "update",
             "receipt_create",
             "receipt_split",
@@ -448,6 +522,7 @@ def execute(
         # Different drafts can target one record. A new creation has no target ID
         # yet; neither lock can coordinate with the YNAB UI or other API clients.
         if draft.get("operation") in {
+            "delete",
             "update",
             "receipt_split",
             "receipt_approval",
@@ -479,6 +554,17 @@ def execute(
                 return _apply_receipt_approval_locked(draft, store, client_factory())
             if confirm != draft["id"]:
                 raise CliError("--confirm must exactly match the draft id")
+            if draft["operation"] == "delete":
+                proposal = draft.get("proposal", {})
+                if proposal.get("protected_states") and (
+                    proposal.get("allow_protected") is not True
+                    or confirm_protected != draft["transaction_id"]
+                ):
+                    raise CliError(
+                        "Protected deletion requires explicit approval of the full removal preview and --confirm-protected matching the exact transaction id"
+                    )
+            elif confirm_protected is not None:
+                raise CliError("--confirm-protected is only for protected transaction deletion")
             legacy_rate_rejection = (
                 draft.get("status") == "failed"
                 and draft.get("stage") == "write_rejected"

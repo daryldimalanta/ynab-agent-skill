@@ -292,6 +292,13 @@ class YnabClient:
             body={"transaction": transaction},
         )
 
+    def delete_transaction(self, plan_id: str, transaction_id: str) -> dict[str, Any]:
+        """Transport only; supported callers must use guarded draft execution."""
+        return self.request(
+            "DELETE",
+            f"/plans/{_safe_id(plan_id)}/transactions/{_safe_id(transaction_id)}",
+        )
+
 
 def _safe_id(value: str) -> str:
     # IDs are opaque path segments. Posted recurring entries can retain an

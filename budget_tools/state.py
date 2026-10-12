@@ -172,6 +172,7 @@ class StateStore:
         self.locks_dir = self.root / "locks"
         self.config_path = self.root / "config.json"
         self.audit_path = self.root / "audit.jsonl"
+        self.deletion_history_path = self.root / "deletion-history.md"
 
     def ensure(self) -> None:
         for path in (self.root, self.drafts_dir, self.locks_dir):
@@ -309,6 +310,36 @@ class StateStore:
                 os.fsync(descriptor)
             finally:
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
+
+    def append_deletion_history(self, record: dict[str, Any] | None = None) -> str:
+        """Append/fsync a shared private Markdown journal; never overwrite history.
+
+        Indented JSON preserves arbitrary memo text as data. The sealed draft is
+        the restoration authority; Markdown is a readable redundant record.
+        """
+        self.ensure()
+        header = ("# YNAB deletion history\n\n"
+                  "Private shared record for agents using this state root. Do not publish.\n"
+                  "Recreation requires a reviewed draft and creates a new transaction ID; "
+                  "import links and reconciliation history cannot be restored.\n\n")
+        with _open_private(self.deletion_history_path, os.O_RDWR | os.O_CREAT | os.O_APPEND) as descriptor:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            try:
+                text = header if os.fstat(descriptor).st_size == 0 else ""
+                if record is not None:
+                    text += "## Deletion event\n\n" + "\n".join(
+                        "    " + line for line in json.dumps(record, indent=2, sort_keys=True).splitlines()
+                    ) + "\n\n"
+                remaining = memoryview(text.encode("utf-8"))
+                while remaining:
+                    written = os.write(descriptor, remaining)
+                    if written <= 0:
+                        raise StateError("Could not persist deletion history")
+                    remaining = remaining[written:]
+                os.fsync(descriptor)
+            finally:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        return str(self.deletion_history_path)
 
     @staticmethod
     def now() -> str:

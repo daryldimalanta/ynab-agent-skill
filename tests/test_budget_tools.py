@@ -144,6 +144,12 @@ class FakeClient:
         self.transaction.update(transaction)
         return {"data": {"transaction": dict(self.transaction)}}
 
+    def delete_transaction(self, plan_id, transaction_id):
+        self._check_plan(plan_id)
+        self._check_transaction(transaction_id)
+        self.transaction["deleted"] = True
+        return {"data": {"transaction": dict(self.transaction)}}
+
 
 class MoneyTests(unittest.TestCase):
     def test_currency_conversion_is_exact(self):

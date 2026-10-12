@@ -143,4 +143,25 @@ Use `drafts reconcile DRAFT_ID` after an uncertain or interrupted write. It only
 
 Apply and resume both enforce the 24-hour expiry. Reviewed content is sealed; changes require a new reviewed draft. Older unsealed drafts cannot be applied, but do not automatically replace an uncertain creation. Local locks coordinate ynab-agent-skill callers, but another YNAB client can still change a transaction after its final read. Do not expose the private audit wholesale.
 
-The CLI does not expose deletion. Do not bypass that boundary with a raw API call.
+## Guarded transaction deletion and restoration
+
+Requires CLI 0.8.0 or later. For provisional, duplicate, or superseded transactions, use guarded deletion instead of raw API calls:
+
+```ynab
+transactions draft-delete TRANSACTION_ID --account ACCOUNT --reason "REASON" ...
+drafts apply DRAFT_ID --confirm DRAFT_ID ...
+```
+
+Deletions require an explicit reason (1–500 characters) and the exact account. They remove the entire transaction and all of its split rows; transfers cannot be deleted.
+
+Protected transactions (approved, cleared, reconciled, bank-imported, or matched) are rejected by default. To draft an exception for a protected record, pass `--allow-protected`. Applying a protected deletion draft requires the user's explicit approval of the full preview and `--confirm-protected TRANSACTION_ID` matching the exact transaction ID.
+
+Application deletes the record and performs readback verification (observing `deleted: true` or 404 while ensuring the account still exists). Uncertain deletion outcomes can be reconciled with `drafts reconcile DRAFT_ID`, which verifies absence without replaying the delete. Every deletion event is logged to private `deletion-history.md`.
+
+To restore a verified deleted transaction, draft manual recreation:
+
+```ynab
+transactions draft-restore-deletion DELETION_DRAFT_ID
+```
+
+Restoration checks for duplicate candidates before drafting and rechecks them on application. It creates a new manual transaction in uncleared and unapproved status; bank import links and reconciliation history cannot be restored.

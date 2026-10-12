@@ -19,6 +19,7 @@ ynab-agent-skill/
 │   ├── __init__.py                  Package version
 │   ├── cli.py                       Parser, output and command dispatch
 │   ├── transactions.py              Transaction reads, drafting and comparisons
+│   ├── deletion.py                  Transaction deletion drafting, eligibility, and restoration
 │   ├── transaction_workflow.py      Guarded execution and durable recovery
 │   ├── utils.py                     Resolvers and shared helpers
 │   ├── errors.py                    Shared command/workflow error
@@ -81,7 +82,9 @@ flowchart TD
     Proposal --> State[state.py: private file access]
     CLI --> State
     CLI --> Receipts[receipts.py: proposal validation]
+    CLI --> Deletion[deletion.py: deletion drafting and restoration]
     CLI --> Workflow[transaction_workflow.py: guarded execution]
+    Workflow --> Deletion
     Workflow --> State
     Workflow --> API
     CLI --> Planning[planning.py: budget review and execution]
@@ -102,7 +105,7 @@ These arrows show responsibility and data flow. `SKILL.md` is an instruction fil
 
 ### Command orchestration: `cli.py`
 
-[`budget_tools/cli.py`](budget_tools/cli.py) contains argument parsing, output and dispatch. Transaction reads/drafting are in `transactions.py`, shared resolution/helpers in `utils.py`, and execution policy in `transaction_workflow.py`. Budget execution policy is in `planning.py`. Both guarded interfaces accept injected clients and own applicable authorization and lock checks independently of CLI callers.
+[`budget_tools/cli.py`](budget_tools/cli.py) contains argument parsing, output and dispatch. Transaction reads/drafting are in `transactions.py`, deletion and restoration in `deletion.py`, shared resolution/helpers in `utils.py`, and execution policy in `transaction_workflow.py`. Budget execution policy is in `planning.py`. Both guarded interfaces accept injected clients and own applicable authorization and lock checks independently of CLI callers.
 
 | Area and owner | Functions to start with | Responsibility |
 | --- | --- | --- |
@@ -110,6 +113,7 @@ These arrows show responsibility and data flow. `SKILL.md` is an instruction fil
 | Setup and reads | `cmd_terms`, `cmd_auth`, `cmd_plans`, `cmd_accounts`, `cmd_categories`, `cmd_payees` | Notice acknowledgment, authentication checks, plan selection, resource listing |
 | Matching (`transactions.py`) and resolution (`utils.py`) | `_transaction_query`, `_resolve_account`, `_resolve_category`, `_resolve_payee` | Request scoped records and resolve exact identifiers/names |
 | Draft construction (`transactions.py`, formatting in `utils.py`) | `cmd_transactions`, `_validated_receipt_proposal`, `_receipt_payload`, `_receipt_draft_shape`, `_draft_public` | Assess a proposal, construct the API payload, save the reviewable draft, and format the preview |
+| Deletion and restoration (`deletion.py`) | `create_draft`, `require_eligible`, `readback`, `finish`, `create_restoration_draft` | Draft guarded deletion, enforce eligibility/protected states, verify readback, and prepare manual restoration |
 | Apply and recovery (`transaction_workflow.py`; CLI dispatch only) | `execute`, `_apply_draft_locked`, `_reconcile_draft_locked`, `_apply_receipt_approval_locked` | Enforce locks, confirmation, age, allowed states, writes, and recovery |
 | Verification (`transactions.py`) | `_fingerprint`, `_transaction_invariants`, `_verification`, `_receipt_verification`, `_canonical_subtransactions` | Detect stale transactions and compare saved records with the intended result |
 

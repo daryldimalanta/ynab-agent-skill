@@ -1,6 +1,16 @@
 # Validation
 
-## Current source: Python 3.12 support policy — 2026-10-11
+## Current source: guarded transaction deletion and restoration — 2026-10-12
+
+Version `0.8.0`; base `dc21983` plus guarded transaction deletion, sealed deletion drafts, protected-state enforcement, readback verification, audit history, and manual restoration drafts. Supported runtime: **Python 3.12 on macOS**, with package requirement `>=3.12,<3.13`. Verified interpreter: **Python 3.12.15**, Darwin `25.6.0` / `arm64`.
+
+`TMPDIR=/private/tmp PYTHONDONTWRITEBYTECODE=1 env python3 -B -m tools.quality full` completed with exit 0: source consistency, **257 core tests, 50 safety tests, all 28 targeted mutation faults detected with passing controls**; zero failures, errors, or skips. Local report: `tmp/quality/20261012T052740614483Z.json`; source SHA-256: `168d2857dcdb186438fb39e1ff3a1fd72338b1f6c9af0d6077b9bc2ca10a671f`. Thirteen core cases were added covering fingerprinting, eligibility validation, protected states (imported, matched, cleared, reconciled, transfers), `--confirm-protected`, sealed deletion drafts, post-delete readback 404/deleted verification, uncertain deletion reconciliation, manual restoration drafts, duplicate restoration prevention, and split restoration.
+
+`PYTHONDONTWRITEBYTECODE=1 python3 -B -m tools.dev_checks` passed correctness lint across Python source roots, formatting checks for seven owned modules, and strict typing.
+
+Canonical skill guidance and README were updated in source to document `transactions draft-delete`, `drafts apply`, and `transactions draft-restore-deletion`. Native host discovery, model interpretation evaluations and live financial pilots remain unrun. No live account, credential, financial operation, or publication was performed.
+
+## Historical source: Python 3.12 support policy — 2026-10-11
 
 Version `0.7.0`; base `079e5e4` plus runtime-policy, metadata, documentation and regression-test changes. Supported runtime: **Python 3.12 on macOS**, with package requirement `>=3.12,<3.13`. Verified interpreter: **Python 3.12.15**, Darwin `25.6.0` / `arm64`. Other Python minor versions are unsupported; other 3.12 patch versions are allowed but were not independently exercised.
 

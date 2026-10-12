@@ -208,6 +208,9 @@ def cmd_drafts(args: argparse.Namespace, store: StateStore) -> None:
     if command == "list":
         utils._json_output(store.list_drafts())
         return
+    if command == "deletion-history":
+        utils._json_output({"deletion_history_path": store.append_deletion_history()})
+        return
     draft = store.load_draft(args.draft_id)
     if command == "show":
         utils._json_output(_draft_public(draft))
@@ -223,6 +226,7 @@ def cmd_drafts(args: argparse.Namespace, store: StateStore) -> None:
     utils._json_output(transaction_workflow.execute(
         store, args.draft_id, client_factory=utils._client,
         command=command, confirm=getattr(args, "confirm", None),
+        confirm_protected=getattr(args, "confirm_protected", None),
     ))
 
 
@@ -353,14 +357,28 @@ def build_parser() -> argparse.ArgumentParser:
     update_parser.add_argument("transaction_id")
     _add_mutation_fields(update_parser, create=False)
 
+    delete_parser = transaction_commands.add_parser(
+        "draft-delete", help="Review removal of one exact transaction; protected records require explicit exception")
+    delete_parser.add_argument("transaction_id")
+    delete_parser.add_argument("--account", required=True, help="Exact account name or id")
+    delete_parser.add_argument("--reason", required=True, help="Explicit purpose of deleting this record")
+    delete_parser.add_argument("--allow-protected", action="store_true",
+        help="Draft an explicit exception for approved/posted/reconciled records; additional apply confirmation required")
+
+    restore_parser = transaction_commands.add_parser("draft-restore-deletion")
+    restore_parser.add_argument("deletion_draft_id")
+
     drafts = commands.add_parser("drafts", help="Review or explicitly apply immutable write drafts")
     draft_commands = drafts.add_subparsers(dest="drafts_command", required=True)
     draft_commands.add_parser("list")
+    draft_commands.add_parser("deletion-history", help="Create or locate shared private deletion history; no API access")
     show = draft_commands.add_parser("show")
     show.add_argument("draft_id")
     apply = draft_commands.add_parser("apply")
     apply.add_argument("draft_id")
     apply.add_argument("--confirm", required=True, help="Must exactly match the draft id")
+    apply.add_argument("--confirm-protected",
+        help="Exact transaction id, only after explicit approval of a protected deletion")
     reconcile = draft_commands.add_parser("reconcile")
     reconcile.add_argument("draft_id")
     resume = draft_commands.add_parser("resume")
