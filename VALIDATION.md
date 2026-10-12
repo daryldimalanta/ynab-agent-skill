@@ -1,6 +1,14 @@
 # Validation
 
-## Current source: guarded transaction deletion and restoration — 2026-10-12
+## Current documentation: deletion and restoration corrections — 2026-10-12
+
+Version `0.8.0`; base `81af044` plus documentation-only changes in `ARCHITECTURE.md`, `README.md` and this report. The architecture now includes DELETE transport, guarded removal/recreation side effects, protected-state review, private history and restoration limits. README clarifies the shared history location, path-only command output and retained sealed-draft requirement for recreation.
+
+The offline documentation consistency check passed with exit 0: source-manifest completeness, relative documentation links and designated CLI examples checked against the parser, with network/credential/private-state access blocked by the existing offline guard. Diff whitespace passed. Current distribution source SHA-256: `c35ebc3c4eba6351c953a3b75045d6f3f3083f16c409e7aef0b703598cd6c9d6` (reports excluded). Runtime, tests, installed skill files and schemas are unchanged. The full quality report `tmp/quality/20261012T072819462327Z.json` passed 257 core tests, 50 safety tests and all 28 existing targeted mutation faults on Python 3.12.15 before this documentation edit, at source digest `168d2857dcdb186438fb39e1ff3a1fd72338b1f6c9af0d6077b9bc2ca10a671f`. Its automated full-report identity therefore predates these documentation bytes; the financial suites were not rerun for this prose-only correction. The mutation set is the existing four runners, not a new deletion-specific mutation set.
+
+No runtime behavior, live financial operation, installation or publication is part of this documentation correction. Historical results below are retained with their original provenance.
+
+## Historical source: guarded transaction deletion and restoration — 2026-10-12
 
 Version `0.8.0`; base `dc21983` plus guarded transaction deletion, sealed deletion drafts, protected-state enforcement, readback verification, audit history, and manual restoration drafts. Supported runtime: **Python 3.12 on macOS**, with package requirement `>=3.12,<3.13`. Verified interpreter: **Python 3.12.15**, Darwin `25.6.0` / `arm64`.
 

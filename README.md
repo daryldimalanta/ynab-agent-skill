@@ -180,19 +180,19 @@ ynab-agent-skill transactions draft-delete TRANSACTION_ID --account ACCOUNT --re
 ynab-agent-skill drafts apply DRAFT_ID --confirm DRAFT_ID --confirm-protected TRANSACTION_ID
 ```
 
-All deletion attempts are journaled to private `deletion-history.md`. To inspect or locate this log without API access:
+Before sending a deletion, the workflow saves the original transaction and request intent in private `deletion-history.md`; later events record verification and restoration. Both Codex and Antigravity using the same state root share this file. Its default location is `~/Library/Application Support/Budget Tools for YNAB/deletion-history.md`. To create the file if absent or return its location without API access:
 
 ```ynab
 ynab-agent-skill drafts deletion-history
 ```
 
-If an attempted deletion was verified, a replacement can be manually drafted from historical state:
+The command returns the path; it does not display the history contents. Keep this history and the sealed drafts private. If an attempted deletion was verified, a replacement can be manually drafted from its retained sealed deletion draft:
 
 ```ynab
 ynab-agent-skill transactions draft-restore-deletion DELETION_DRAFT_ID
 ```
 
-Restoration checks for duplicate candidates before drafting and rechecks them on application. It creates a new manual transaction in uncleared and unapproved status; bank import links and reconciliation history cannot be restored.
+Review the recreation draft and obtain explicit user approval before applying it. Restoration checks for duplicate candidates before drafting and rechecks them on application. It creates a new manual transaction ID with the recorded amounts, category splits and memos, in uncleared and unapproved status; bank import/match links, original IDs, approval and reconciliation history cannot be restored. The Markdown log alone is not sufficient to execute restoration if the sealed deletion draft is missing.
 
 ## Arithmetic, recovery, and limits
 

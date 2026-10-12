@@ -1,6 +1,6 @@
 # Project structure and architecture
 
-`ynab-agent-skill` has two cooperating parts: an agent skill that describes receipt review and monthly budget planning, and a local Python command that validates proposals and performs controlled YNAB operations. The command runs on demand; there is no background service, database server, bundled model, or OCR engine.
+`ynab-agent-skill` has two cooperating parts: an agent skill that describes receipt review, monthly budget planning, and transaction deletion/restoration, and a local Python command that validates proposals and performs controlled YNAB operations. The command runs on demand; there is no background service, database server, bundled model, or OCR engine.
 
 This guide maps the current implementation (versioned in `budget_tools/__init__.py`). Start with [README.md](README.md) for installation and everyday use, [the proposal reference](skills/ynab-agent-skill/references/proposal.md) for input JSON, and [VALIDATION.md](VALIDATION.md) for observed test results and remaining work.
 
@@ -133,6 +133,18 @@ Successful readback records `applied`; a mismatch records `verification_failed`.
 
 `tests/test_budget_planning.py` uses a synthetic endpoint model with the actual API serializer and CLI. The focused mutation runner deliberately breaks rollover handling, stale-state checks, expiry, sealing, readback, outgoing amounts and category eligibility. Model-level scenarios are separately listed in [budget acceptance cases](validation/BUDGET_ACCEPTANCE_CASES.md).
 
+### Transaction deletion and restoration: `deletion.py`
+
+[`budget_tools/deletion.py`](budget_tools/deletion.py) constructs deletion/restoration drafts and verifies the resulting state. `transactions draft-delete` reads one exact transaction in the selected plan and requires an exact account and a nonempty reason. The sealed draft retains the complete original transaction, a full-record fingerprint, and a parent/split preview. It removes the whole transaction, including every split row.
+
+Approved, cleared, reconciled, imported, and matched records are protected by default. An explicitly requested exception uses `--allow-protected` when drafting and additionally requires `--confirm-protected TRANSACTION_ID` when applying, alongside the ordinary draft confirmation. The agent must show the exact record, protected states, amount, memos and all split rows and obtain explicit user approval of that removal. These local confirmation strings are operator assertions, not authenticated evidence of human consent. Parent transfers and transfer split rows remain blocked even with an exception.
+
+`transaction_workflow.execute()` owns terms, seal verification, draft/transaction locks, confirmation, pending state, expiry and execution. Before deletion it checks the selected plan, target eligibility and reviewed fingerprint, repeating revalidation after rate-limit waits. It persists request intent and the original snapshot in private history before sending DELETE. Readback verifies the known transaction is marked deleted or that its GET returns `404 resource_not_found` while the original account still exists in the original plan. Other failures do not prove deletion. This establishes current absence/deleted state, not which client caused it. Uncertain attempts use read-only `drafts reconcile`; they cannot be blindly replayed. Local locks cannot prevent another client from changing or matching a transaction after the final check.
+
+`StateStore.deletion_history_path` points to `deletion-history.md` under the protected private state root. With the default configuration, its location is `~/Library/Application Support/Budget Tools for YNAB/deletion-history.md`. Both hosts using that state root share the same journal. `drafts deletion-history` creates the file if absent and returns its location without contacting YNAB; it does not print its contents. Append operations lock and flush the file, preserving original snapshots and attempt/verification/restoration events. The Markdown is a readable redundant record; restoration uses the sealed deletion draft rather than trusting edited Markdown. Never distribute the history or drafts with source or installed skill files.
+
+`transactions draft-restore-deletion DELETION_DRAFT_ID` requires a verified deletion, the original selected plan, an available account and no same-date/same-amount duplicate candidate. It pins one restoration draft ID on the deletion draft to prevent repeated recreation drafts and checks absence/duplicates again before creation, including after rate waits. Recreation uses a new manual transaction ID, preserving recorded amounts, category splits and memos while setting `cleared=uncleared` and `approved=false`. It cannot restore bank-import/match links, old transaction/split IDs, approval or reconciliation history. The creation draft requires its own review and explicit approval; uncertain creation follows the existing no-replay recovery rules.
+
 ### Receipt rules: `receipts.py`
 
 [`budget_tools/receipts.py`](budget_tools/receipts.py) owns `validate_receipt_proposal()` and exact decimal-to-milliunit conversion. It checks proposal version, selected plan/transaction, expected account/date/amount, receipt totals, allocation totals, currency precision, memos, evidence fields, unresolved facts, and supported tender count.
@@ -145,7 +157,7 @@ This module does not directly open files or make HTTP requests. It receives the 
 
 [`budget_tools/api.py`](budget_tools/api.py) provides `YnabClient`. Resource methods build paths for users, plans, accounts, settings, categories, payees, transactions, and budget months. Budget assignments use PATCH with a `category` JSON wrapper containing only `budgeted`. `request()` adds authentication and the user agent, encodes JSON, invokes the transport, decodes the response, and converts transport/API failures into `ApiError`.
 
-The origin is fixed to `https://api.ynab.com/v1`. Resource IDs are checked before path construction, and the default urllib transport rejects authenticated redirects. `_safe_id` accepts nonempty ASCII letters, digits, hyphens and underscores, preserving posted recurring transaction IDs verbatim. It rejects separators, query/fragment delimiters, percent escapes, dot segments and non-string inputs. ID syntax never selects a scheduled endpoint or determines the transaction date. Creation uses POST and updates use PUT, with a `transaction` JSON wrapper. The client has no deletion method. Only confirmed HTTP 429 rejections are automatically retried; uncertain writes retain the existing recovery boundary.
+The origin is fixed to `https://api.ynab.com/v1`. Resource IDs are checked before path construction, and the default urllib transport rejects authenticated redirects. `_safe_id` accepts nonempty ASCII letters, digits, hyphens and underscores, preserving posted recurring transaction IDs verbatim. It rejects separators, query/fragment delimiters, percent escapes, dot segments and non-string inputs. ID syntax never selects a scheduled endpoint or determines the transaction date. Creation uses POST and updates use PUT, with a `transaction` JSON wrapper. `delete_transaction()` sends DELETE to the exact plan/transaction path without a request body. The supported deletion interface remains `transaction_workflow.execute()` with a reviewed deletion draft; the transport method does not enforce financial authorization. Only confirmed HTTP 429 rejections are automatically retried; uncertain writes retain the existing recovery boundary.
 
 [`budget_tools/rate_limit.py`](budget_tools/rate_limit.py) provides persistent per-token rolling-window accounting. The CLI attaches it to every real client. It reserves and flushes a slot before each attempt, uses server usage headers to account conservatively for external callers, and persists cooldowns. A token SHA-256 digest identifies the ledger; the token, URLs, payloads and financial contents are never stored there. Short token-scoped locks protect accounting across processes and are released before sleeping/network I/O. Missing state starts a new ledger; unsafe or corrupt existing state fails closed. A backwards clock conservatively extends the wait.
 
@@ -177,7 +189,8 @@ For a confirmed missing payee, `draft-receipt-create --new-payee` seals the exac
 | `budgets months`, `budgets get` | API reads | Read configuration and rate-limit state |
 | `budgets draft-assign` | API reads, no budget write | Save a sealed monthly assignment draft |
 | `drafts list`, `show` | None | Read private drafts; listing may initialize private directories |
-| `drafts apply` | May create/update/approve a transaction or set a monthly category assignment | Persist progress, verification results, and audit records |
+| `drafts deletion-history` | None | Create the private Markdown history if absent and return its path; preserve existing contents |
+| `drafts apply` | May create/update/approve/delete a transaction, recreate a deleted transaction, or set a monthly category assignment | Persist progress, verification results, audit records, and deletion/restoration history |
 | `drafts reconcile` | API reads only | Update recovery state and, when finalized, local audit records |
 | `drafts resume` | May send remaining receipt approval | Persist approval progress and verification |
 
@@ -234,7 +247,7 @@ Draft `status` expresses whether the operation is pending, in progress, uncertai
 
 The table is a guide to transaction workflows, not an exhaustive state-machine specification; the apply/reconcile functions contain the full branches. Transaction reconciliation requires a known transaction ID and never guesses one from amount alone. It can establish completion or return a receipt draft to `approval_pending`. Resume sends only the remaining receipt approval and enforces the same 24-hour expiry. Budget reconciliation instead uses its sealed month/category target, with no resume operation; its states are described in the budget planning section above.
 
-`transaction_workflow.execute()` locks the draft and, for an existing known receipt/update target, the plan/transaction pair. That serializes local callers, including different drafts aimed at one transaction. A new creation has no target ID to lock before its first write, and these locks cannot coordinate with YNAB's UI or other API clients.
+`transaction_workflow.execute()` locks the draft and, for an existing known receipt/update/deletion target, the plan/transaction pair. That serializes local callers, including different drafts aimed at one transaction. A new creation has no target ID to lock before its first write, and these locks cannot coordinate with YNAB's UI or other API clients.
 
 ## Private files live outside the checkout
 
@@ -265,6 +278,7 @@ This tree describes the implementation; it is not a sample of anyone's private s
 | [tests/test_transaction_reads.py](tests/test_transaction_reads.py) | Opaque posted IDs, path rejection, default/bulk read contracts, exact split context, and suffixed-ID authorization/recovery |
 | [tests/test_mutation_gates.py](tests/test_mutation_gates.py) | Mutation runners reject missed faults, test errors, and empty/failing controls |
 | [tests/test_budget_planning.py](tests/test_budget_planning.py) | Monthly amounts, exact assignments, explicit review, stale-state/rate-wait checks, seals, locks and read-only recovery |
+| [tests/test_deletion.py](tests/test_deletion.py) | Deletion eligibility, protected-state confirmation, sealed previews, readback/recovery, private history, duplicate prevention and manual/split restoration |
 | [validation/audit_mutation_checks.py](validation/audit_mutation_checks.py) | Seven deliberate in-memory workflow/transport faults |
 | [validation/audit_new_payee_checks.py](validation/audit_new_payee_checks.py) | Four deliberate missing-payee faults |
 | [validation/audit_transaction_read_checks.py](validation/audit_transaction_read_checks.py) | Ten deliberate ID/path, split-context, default-contract and request-count faults |
