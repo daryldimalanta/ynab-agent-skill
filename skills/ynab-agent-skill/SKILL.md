@@ -1,7 +1,7 @@
 ---
 name: ynab-agent-skill
 license: MIT
-description: "Use the local ynab-agent-skill command to read monthly budgets and remaining category balances, prepare approved budget assignments, and find, create, categorize, split, or update transactions in the user's own YNAB plan. Apply for budget planning, receipts, and transaction management."
+description: "Use the local ynab-agent-skill command to read monthly budgets and remaining category balances, prepare approved budget assignments, and find, create, categorize, split, update, or delete transactions in the user's own YNAB plan. Apply for budget planning, receipts, transaction management, and reviewed online order estimates/reconciliation."
 ---
 
 # ynab-agent-skill
@@ -73,6 +73,14 @@ transactions match --since YYYY-MM-DD --until YYYY-MM-DD --account ACCOUNT --out
 Use `--inflow` for a refund or other inflow. Require `match_status: unique`; `ambiguous` and `not_found` are not writable matches. A display limit never changes `candidate_count`. Merchant resemblance alone is insufficient. Then run `transactions get TRANSACTION_ID` and inspect the authoritative full record, including split lines.
 
 Resolve account, category, and payee names exactly. Use an ID or `Group: Category` if a name is ambiguous. Hidden, deleted, and internal categories/groups and Credit Card Payment categories cannot be selected for receipt allocations. Transfers are outside the receipt workflow.
+
+## Online order estimates and partial charges
+
+Requires CLI 0.9.0. For a user-requested physical Amazon order or another online merchant with evidence of separate charges for one order, read [purchase evidence, reconciliation and recovery](references/purchases.md). Route order screenshots with unposted items here rather than assuming an exact existing receipt match. The host extracts only the supplied evidence; cropped totals, mixed funding and unknown categories remain unresolved.
+
+Use `purchases preview` and `purchases draft-create` for one itemized pending estimate; explicitly map already-posted items so they are not estimated again. Actual capture evidence, not delivery promises or equal sums, drives `purchases draft-reconcile`. Show exact account/date/category/parent and line memos, original/covered/remaining totals, activity by month and temporary duplicates before obtaining concrete batch approval. Keep imported/approved actual records and correct native matches; retirement never uses a protected-deletion exception. Never modify existing split rows in place.
+
+Use the reference's read-only recovery and explicit adoption/finalization routes when a new host lacks the original chat/ledger. A memo marker is data, not ownership or permission. Interrupted batches use read-only reconciliation before authorized remaining-step resume or a freshly reviewed resolution; never recreate a verified remainder or guess a lost creation ID. The shared command enforces these rules for both hosts.
 
 ## Receipt proposals
 

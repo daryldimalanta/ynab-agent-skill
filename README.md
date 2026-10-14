@@ -1,6 +1,6 @@
 # ynab-agent-skill
 
-An unofficial YNAB agent skill backed by a local API wrapper for reviewing monthly budgets and remaining balances, adjusting approved category assignments, reviewing receipts, and managing transactions. Shared instructions are intended for Codex and Antigravity. The project, canonical command, and skill are named `ynab-agent-skill`. The legacy command `ynab-codex-skill` forwards to the same implementation.
+An unofficial YNAB agent skill backed by a local API wrapper for reviewing monthly budgets and remaining balances, adjusting approved category assignments, reviewing receipts, managing transactions, and tracking online orders that may post as separate charges. Shared instructions are intended for Codex and Antigravity. The project, canonical command, and skill are named `ynab-agent-skill`. The legacy command `ynab-codex-skill` forwards to the same implementation.
 
 ## ⚠️ Disclaimer
 
@@ -43,7 +43,7 @@ The distributable skill is located at `skills/ynab-agent-skill`. To install it n
 - **What it does**: The installer copies the reviewed skill files. It preserves your existing private preferences (`references/local-preferences.md`) byte-for-byte across updates. If no preferences exist, it generates a minimal file pointing to the checkout's executable. It also handles legacy `ynab-codex-skill` migration to avoid duplicate active skills and creates safe backups in `~/.ynab-agent-skill-backups/`.
 - **Dry run**: Add `--dry-run` to preview changes without modifying the filesystem.
 
-**Note**: Installing the skill does not install a standalone application. The default CLI and Python package (`budget_tools`) remain in this repository checkout; an optional CLI wheel is described below. The installed skill finds the local executable via the `local-preferences.md` file generated during installation, or by searching your PATH. Native skill discovery by the host app may require a fresh session or reload. The installer verifies each installed public file and private preference bytes. Each host update is staged and verified before replacement. The installer keeps separate unique backups per host and restores both prior installations on a caught update failure. A process kill or power loss can require manual restoration from those backups. Only the seven explicitly listed public skill files are distributed; extra source files are excluded. Unknown or linked storage paths are rejected. It does not run a live financial workflow test.
+**Note**: Installing the skill does not install a standalone application. The default CLI and Python package (`budget_tools`) remain in this repository checkout; an optional CLI wheel is described below. The installed skill finds the local executable via the `local-preferences.md` file generated during installation, or by searching your PATH. Native skill discovery by the host app may require a fresh session or reload. The installer verifies each installed public file and private preference bytes. Each host update is staged and verified before replacement. The installer keeps separate unique backups per host and restores both prior installations on a caught update failure. A process kill or power loss can require manual restoration from those backups. Only the eight explicitly listed public skill files are distributed; extra source files are excluded. Unknown or linked storage paths are rejected. It does not run a live financial workflow test.
 
 ### Using the CLI directly
 
@@ -64,7 +64,7 @@ Memo conventions are described in [memo guidance](skills/ynab-agent-skill/refere
 
 For credential compatibility, the macOS Keychain generic-password item retains service `budget-tools-for-ynab` and account `personal`. These are lookup labels, not a token. Existing users need no credential migration. For a new setup, the user should create the item in Keychain Access themselves; never put its password in a command, repository, proposal, or chat.
 
-Private state remains under `~/Library/Application Support/Budget Tools for YNAB`. This includes notice acknowledgment, selected plan, drafts, recovery state, locks, and private audit records. The internal Python package remains `budget_tools`. Renaming the command does not reset or migrate either storage location.
+Private state remains under `~/Library/Application Support/Budget Tools for YNAB`. This includes notice acknowledgment, selected plan, drafts, recovery state, purchase ledgers, locks, and private audit records. The internal Python package remains `budget_tools`. Renaming the command does not reset or migrate either storage location.
 
 State access uses pinned directory descriptors, no-follow checks, ownership checks, private modes, atomic writes, and flushes. Only recognized local APFS/HFS destinations within the user Library or `/private/tmp` are accepted. Unknown/nonlocal filesystems, symlinked directories, and unsafe files are rejected. User storage restrictions still apply.
 
@@ -210,6 +210,26 @@ Delayed mutations revalidate the target and check draft expiry before sending. A
 - Local locks serialize both the same draft and different drafts targeting the same transaction. They cannot lock YNAB's UI or other clients; there is no cross-client atomicity guarantee.
 - Unique-match and duplicate-check evidence, truthful free-text evidence, and human authorization partly depend on the operator/skill. Automatic waits/retries execute only the current authorized operation; arbitrary unattended financial decision-making is outside the validated scope.
 
+## Amazon and other online order charges
+
+Version 0.9.0 adds reviewed purchase estimates and reconciliation. Read the [purchase reference](skills/ynab-agent-skill/references/purchases.md) for the evidence schema, complete commands and recovery routes. The host interprets a screenshot into private item/unit allocations; one pending transaction reserves the remaining amounts in their actual categories. Its memo identifies an AI-created estimate that may post as separate charges. Delivery and shipment hints produce private hypotheses, never extra predicted YNAB entries or proof of billing.
+
+```ynab
+ynab-agent-skill purchases preview --proposal ORDER.json
+ynab-agent-skill purchases draft-create --proposal ORDER.json
+ynab-agent-skill drafts show DRAFT_ID
+ynab-agent-skill drafts apply DRAFT_ID --confirm DRAFT_ID
+ynab-agent-skill purchases inspect PURCHASE_ID
+ynab-agent-skill purchases draft-reconcile PURCHASE_ID --proposal CHARGES.json
+ynab-agent-skill purchases recover TRANSACTION_ID --account ACCOUNT_ID
+```
+
+Show every proposed item/category memo and amount, actual record update, remainder creation, exact old estimate deletion, and month/category activity change before asking for approval. Applying a partial posting preserves and verifies the actual charge, creates and verifies a smaller remainder, then deletes the unchanged eligible old estimate. No split-row edits or protected-deletion override are used. Approved/cleared/reconciled/imported/matched estimates stop replacement; a correct native match is retained and its parent memo finalized after review. Actual charge approval/import/clearing metadata is preserved.
+
+Memos plus linked actual records support a fresh host with no local ledger. Recovery is read-only; adopting an eligible estimate or finalizing a posted native match requires a fresh reviewed draft. Interrupted batches persist every step and reconcile by readback; unknown writes are never replayed. Fresh reviewed resolutions retain verified remainder IDs. Private purchase ledgers share the existing local application state; retired estimates use the existing private deletion history.
+
+Only a single card/currency, physical orders and evidenced split-charge merchants are supported. Mixed tenders, refunds, cancellations, revised allocations, immutable incorrect actual splits and cross-order captures require separate review. Exact amount matches are candidates only. Complete memos must fit 500 characters; no silent truncation. Up to 1,000 paid units is an application bound, not a verified YNAB split-row limit. Host interpretation, live matching and the 50-item API case remain separate acceptance checks; this implementation has offline synthetic coverage.
+
 ## Offline verification
 
 From the checkout root, use the same checked-in runner in either agent:
@@ -219,7 +239,7 @@ python3 -B -m tools.quality quick
 python3 -B -m tools.quality full
 ```
 
-`quick` runs source consistency and both ordinary suites. `full` also runs all four mutation diagnostics. The runner uses synthetic temporary state and a Python guard inherited by child processes; it blocks accidental network, Keychain, existing home-file and private application-state access. Installer subprocesses are restricted to synthetic homes. This is a guard for reviewed Python tests, not an operating-system sandbox against hostile or native code. Reports go only to ignored `tmp/quality/`, with source revision/digest, interpreter/platform, commands, exit status and structured results; raw test output and private values are excluded. Confirm a saved report still matches the source with `python3 -B -m tools.quality full --check-report tmp/quality/REPORT.json`. A quick report cannot satisfy a full-report check.
+`quick` runs source consistency and both ordinary suites. `full` also runs all five mutation diagnostics. The runner uses synthetic temporary state and a Python guard inherited by child processes; it blocks accidental network, Keychain, existing home-file and private application-state access. Installer subprocesses are restricted to synthetic homes. This is a guard for reviewed Python tests, not an operating-system sandbox against hostile or native code. Reports go only to ignored `tmp/quality/`, with source revision/digest, interpreter/platform, commands, exit status and structured results; raw test output and private values are excluded. Confirm a saved report still matches the source with `python3 -B -m tools.quality full --check-report tmp/quality/REPORT.json`. A quick report cannot satisfy a full-report check.
 
 Maintain `tools/source_manifest.txt` when adding source or instruction files. Every public source directory is scanned without following links; only explicitly named generated reports and build/cache directories are excluded. Use `ynab` fenced blocks for parser-checked CLI examples in README, skill and references; placeholders are parsed as arguments, trailing `...` denotes optional additional flags, and unknown commands or malformed quoting fail the check. Examples are never executed. The checker verifies the installer allowlist, canonical version, standalone license, discovery metadata, selected CLI shapes and current-document file links. It does not validate every prose claim or replace model interpretation evaluations. Historical reports are excluded from the source digest.
 
@@ -232,21 +252,22 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m validation.audit_mutation_checks
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m validation.audit_new_payee_checks
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m validation.audit_transaction_read_checks
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m validation.audit_budget_planning_checks
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m validation.audit_purchase_checks
 ```
 
-Fixtures are synthetic. Both test directories must be run. The general mutation diagnostic injects seven faults in memory; the new-payee diagnostic injects four, the transaction-read diagnostic injects ten, and the budget-planning diagnostic injects seven. All require a passing unmodified control and exit nonzero for missed faults or test errors. Assertion failures from an exercised fault are detection evidence, not normal regressions; loader/fixture errors do not count. The [receipt acceptance checklist](validation/RECEIPT_ACCEPTANCE_CASES.md) and [budget acceptance checklist](validation/BUDGET_ACCEPTANCE_CASES.md) are separate from automated tests. No live integration test is run automatically.
+Fixtures are synthetic. Both test directories must be run. The general mutation diagnostic injects seven faults in memory; the new-payee diagnostic injects four, the transaction-read diagnostic injects ten, and the budget-planning diagnostic injects seven, and the purchase diagnostic injects eight (36 faults total). All require a passing unmodified control and exit nonzero for missed faults or test errors. Assertion failures from an exercised fault are detection evidence, not normal regressions; loader/fixture errors do not count. The [receipt acceptance checklist](validation/RECEIPT_ACCEPTANCE_CASES.md) and [budget acceptance checklist](validation/BUDGET_ACCEPTANCE_CASES.md) and [online purchase acceptance checklist](validation/PURCHASE_ACCEPTANCE_CASES.md) are separate from automated tests. No live integration test is run automatically.
 
 ## Developer checks and packaging
 
-Run `python3 -B -m tools.dev_checks` after environment setup. It applies correctness lint to all Python sources, formatting checks to the new workflow/tool modules, and strict typing to the transaction execution boundary and shared errors. The scope is explicit in `pyproject.toml` and `tools/dev_checks.py`; this does not claim the older modules have been fully formatted or strictly typed.
+Run `python3 -B -m tools.dev_checks` after environment setup. It applies correctness lint to all Python sources, formatting checks to the new workflow/tool modules, and strict typing to the transaction execution boundary, shared errors and three purchase modules. The scope is explicit in `pyproject.toml` and `tools/dev_checks.py`; this does not claim the older modules have been fully formatted or strictly typed.
 
-The supported library execution interface is `budget_tools.transaction_workflow.execute(store, draft_id, client_factory=..., command="apply", confirm=draft_id)`. It owns terms, sealed intent, draft/target locks, status, expiry, stale-state checks, durable progress, readback and recovery. Use `command="reconcile"` for API reads only or `command="resume"` for remaining receipt approval only. The CLI delegates to it. Private helpers ending `_locked` are not supported entry points. Confirmation remains an operator assertion; it does not authenticate human approval. Monthly assignments use `budget_tools.planning.execute`.
+The supported library execution interface is `budget_tools.transaction_workflow.execute(store, draft_id, client_factory=..., command="apply", confirm=draft_id)`. It owns terms, sealed intent, draft/target locks, status, expiry, stale-state checks, durable progress, readback and recovery. Use `command="reconcile"` for API reads only or `command="resume"` for remaining receipt approval only. The CLI delegates to it. Private helpers ending `_locked` are not supported entry points. Confirmation remains an operator assertion; it does not authenticate human approval. Monthly assignments use `budget_tools.planning.execute`. Purchase batches use `budget_tools.purchase_workflow.execute`; their child drafts cannot execute independently.
 
 An optional wheel packages the CLI and `budget_tools` only; the skill still uses the reviewed folder installer. Build and inspect it locally:
 
 ```sh
 uv build --wheel --out-dir /private/tmp/ynab-public-wheel
-.venv/bin/python -B -m tools.check_wheel /private/tmp/ynab-public-wheel/ynab_agent_skill-0.8.0-py3-none-any.whl
+.venv/bin/python -B -m tools.check_wheel /private/tmp/ynab-public-wheel/ynab_agent_skill-0.9.0-py3-none-any.whl
 ```
 
 Replace the filename with the version reported by the build. `pyproject.toml` derives it from `budget_tools/__init__.py`. The checker rejects extra/missing files and requires exact package source bytes, license, metadata and both command aliases. Private state, preferences, tests, handoffs, receipts and host installations are excluded. Installing a wheel into a separate virtual environment does not migrate credentials, state, host preferences or executable locations. Inspect the exact artifact again after source changes; no build command publishes it. Only macOS behavior has been verified even though Python wheel metadata uses a generic platform tag.

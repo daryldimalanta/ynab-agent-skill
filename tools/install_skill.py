@@ -17,7 +17,7 @@ import uuid
 SKILL_FILES = (
     'SKILL.md', 'LICENSE.txt', 'agents/openai.yaml',
     'references/budget-planning.md', 'references/long-runs.md',
-    'references/memos.md', 'references/proposal.md',
+    'references/memos.md', 'references/proposal.md', 'references/purchases.md',
 )
 HOSTS = {'codex': '.codex/skills', 'antigravity': '.gemini/config/skills'}
 NAME = 'ynab-agent-skill'

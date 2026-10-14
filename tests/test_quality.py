@@ -39,6 +39,14 @@ class QualityTests(unittest.TestCase):
         self.assertTrue(quality.current(report, 'new', 'quick'))
         self.assertFalse(quality.current(report, 'new', 'full'))
 
+    def test_full_gate_requires_purchase_fault_runner(self):
+        self.assertIn(('validation.audit_purchase_checks', 8), quality.MUTATIONS)
+        completed = {'passed': True, 'exit_code': 0, 'terminal_status': 'completed'}
+        report = {'source_digest': 'new', 'status': 'passed', 'mode': 'full', 'checks': [completed] * 7}
+        self.assertFalse(quality.current(report, 'new', 'full'))
+        report['checks'].append(completed)
+        self.assertTrue(quality.current(report, 'new', 'full'))
+
     def test_failed_test_collection_cannot_pass(self):
         from tools.checks import suite
         with tempfile.TemporaryDirectory() as temporary:

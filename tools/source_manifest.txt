@@ -66,3 +66,10 @@ tools/dev_checks.py
 tests/test_runtime.py
 budget_tools/deletion.py
 tests/test_deletion.py
+budget_tools/purchase_memos.py
+budget_tools/purchases.py
+budget_tools/purchase_workflow.py
+tests/test_purchases.py
+validation/audit_purchase_checks.py
+skills/ynab-agent-skill/references/purchases.md
+validation/PURCHASE_ACCEPTANCE_CASES.md

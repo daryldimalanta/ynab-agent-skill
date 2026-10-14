@@ -53,7 +53,7 @@ def _write_guard(
 def _expected_verification(draft: dict[str, Any], saved: dict[str, Any]) -> dict[str, Any]:
     expected = _generic_expected(draft)
     if (
-        draft.get("workflow") == "deletion_restore"
+        draft.get("workflow") in {"deletion_restore", "purchase_step"}
         and expected.get("category_id") is None
         and saved.get("category_name") == "Split"
         and isinstance(saved.get("category_id"), str)
@@ -290,6 +290,10 @@ def _apply_draft_locked(
 
     def revalidate() -> None:
         _check_draft_age(draft)
+        if draft.get("workflow") == "purchase_step":
+            from budget_tools import purchase_workflow
+
+            purchase_workflow.revalidate_step(client, store, draft)
         new_payee_name = _new_payee_name(draft)
         if new_payee_name is not None:
             _require_missing_payee(client, plan_id, new_payee_name)
@@ -518,6 +522,10 @@ def execute(
             "receipt_approval",
         }:
             raise CliError("Not a supported transaction draft")
+        if draft.get("workflow") == "purchase_step":
+            from budget_tools import purchase_workflow
+
+            purchase_workflow.require_step_authority(store, draft)
         transaction_scope = None
         # Different drafts can target one record. A new creation has no target ID
         # yet; neither lock can coordinate with the YNAB UI or other API clients.

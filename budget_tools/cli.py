@@ -202,6 +202,48 @@ def cmd_payees(args: argparse.Namespace, store: StateStore) -> None:
     )
 
 
+def cmd_purchases(args: argparse.Namespace, store: StateStore) -> None:
+    from budget_tools import purchases
+    from budget_tools.state import read_private_json
+    command = args.purchases_command
+    if command == "list":
+        utils._json_output([{k: r.get(k) for k in ("id", "status", "generation", "remaining", "inflight_draft_id")}
+                           for r in store.list_purchases()])
+        return
+    if command == "get":
+        record = store.load_purchase(args.purchase_id)
+        utils._json_output({"id": record["id"], "model": record["model"], "status": record["status"],
+            "generation": record["generation"], "remaining": record["remaining"],
+            "pending_transaction_id": record["pending"]["id"] if record.get("pending") else None,
+            "actuals": [{"id": a["id"], "units": a["units"]} for a in record["actuals"]],
+            "inflight_draft_id": record.get("inflight_draft_id")})
+        return
+    if command == "cancel-draft":
+        utils._json_output(purchases.cancel_draft(store, args.draft_id, args.confirm))
+        return
+    _selected_plan(store)
+    client = utils._client()
+    if command in {"preview", "draft-create"}:
+        result = purchases.draft_create(client, store, read_private_json(Path(args.proposal)), preview=command == "preview")
+    elif command == "draft-reconcile":
+        result = purchases.draft_reconcile(client, store, args.purchase_id, read_private_json(Path(args.proposal)))
+    elif command == "inspect":
+        result = purchases.inspect(client, store, args.purchase_id, since=args.since, until=args.until)
+    elif command == "recover":
+        result = purchases.recover(client, store, args.transaction_id, args.account, since=args.since, until=args.until)
+    elif command == "draft-finalize":
+        result = purchases.draft_finalize(client, store, args.transaction_id, args.account, args.evidence, since=args.since, until=args.until)
+    elif command == "draft-adopt":
+        result = purchases.draft_adopt(client, store, args.transaction_id, args.account, args.evidence, since=args.since, until=args.until)
+    elif command == "draft-resume":
+        result = purchases.draft_resume(client, store, args.draft_id, args.evidence)
+    elif command == "recover-step":
+        result = purchases.recover_step(client, store, args.draft_id, args.step, args.transaction_id, args.evidence)
+    else:
+        raise CliError("Unsupported purchases command")
+    utils._json_output(_draft_public(result) if result.get("workflow") == "purchase_batch" else result)
+
+
 def cmd_drafts(args: argparse.Namespace, store: StateStore) -> None:
     """Adapt CLI requests to the shared guarded workflow interfaces."""
     command = args.drafts_command
@@ -214,6 +256,14 @@ def cmd_drafts(args: argparse.Namespace, store: StateStore) -> None:
     draft = store.load_draft(args.draft_id)
     if command == "show":
         utils._json_output(_draft_public(draft))
+        return
+
+    if draft.get("workflow") == "purchase_batch":
+        from budget_tools import purchase_workflow
+        if getattr(args, "confirm_protected", None) is not None:
+            raise CliError("Purchase batches cannot authorize protected deletion")
+        utils._json_output(purchase_workflow.execute(store, args.draft_id, client_factory=utils._client,
+            command=command, confirm=getattr(args, "confirm", None), confirm_adopt=getattr(args, "confirm_adopt", None)))
         return
 
     if draft.get("operation") == "budget_assign":
@@ -368,6 +418,41 @@ def build_parser() -> argparse.ArgumentParser:
     restore_parser = transaction_commands.add_parser("draft-restore-deletion")
     restore_parser.add_argument("deletion_draft_id")
 
+    purchases_parser = commands.add_parser("purchases", help="Review online order estimates, posted charges and remaining items")
+    purchase_commands = purchases_parser.add_subparsers(dest="purchases_command", required=True)
+    purchase_commands.add_parser("list")
+    purchase_get = purchase_commands.add_parser("get")
+    purchase_get.add_argument("purchase_id")
+    for name in ("preview", "draft-create"):
+        option = purchase_commands.add_parser(name)
+        option.add_argument("--proposal", required=True, help="Private extracted order evidence JSON")
+    correction = purchase_commands.add_parser("draft-reconcile")
+    correction.add_argument("purchase_id")
+    correction.add_argument("--proposal", required=True)
+    investigation = purchase_commands.add_parser("inspect")
+    investigation.add_argument("purchase_id")
+    investigation.add_argument("--since")
+    investigation.add_argument("--until")
+    for name in ("recover", "draft-adopt", "draft-finalize"):
+        option = purchase_commands.add_parser(name)
+        option.add_argument("transaction_id")
+        option.add_argument("--account", required=True)
+        option.add_argument("--since")
+        option.add_argument("--until")
+        if name in {"draft-adopt", "draft-finalize"}:
+            option.add_argument("--evidence", required=True)
+    fresh = purchase_commands.add_parser("draft-resume", help="Prepare fresh review of resolved partial/expired batch; API reads only")
+    fresh.add_argument("draft_id")
+    fresh.add_argument("--evidence", required=True)
+    cancel = purchase_commands.add_parser("cancel-draft")
+    cancel.add_argument("draft_id")
+    cancel.add_argument("--confirm", required=True)
+    recovery = purchase_commands.add_parser("recover-step")
+    recovery.add_argument("draft_id")
+    recovery.add_argument("--step", required=True, type=int, help="Zero-based creation step index")
+    recovery.add_argument("--transaction-id", required=True)
+    recovery.add_argument("--evidence", required=True)
+
     drafts = commands.add_parser("drafts", help="Review or explicitly apply immutable write drafts")
     draft_commands = drafts.add_subparsers(dest="drafts_command", required=True)
     draft_commands.add_parser("list")
@@ -379,11 +464,13 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--confirm", required=True, help="Must exactly match the draft id")
     apply.add_argument("--confirm-protected",
         help="Exact transaction id, only after explicit approval of a protected deletion")
+    apply.add_argument("--confirm-adopt", help="Exact provisional transaction ID for explicit purchase adoption")
     reconcile = draft_commands.add_parser("reconcile")
     reconcile.add_argument("draft_id")
     resume = draft_commands.add_parser("resume")
     resume.add_argument("draft_id")
     resume.add_argument("--confirm", required=True, help="Must exactly match the draft id")
+    resume.add_argument("--confirm-adopt", help="Exact provisional transaction ID for unfinished purchase adoption")
     return parser
 
 
@@ -410,6 +497,8 @@ def main(argv: Sequence[str] | None = None, *, store: StateStore | None = None) 
             cmd_budgets(args, state)
         elif args.command == "transactions":
             cmd_transactions(args, state)
+        elif args.command == "purchases":
+            cmd_purchases(args, state)
         elif args.command == "drafts":
             cmd_drafts(args, state)
         else:

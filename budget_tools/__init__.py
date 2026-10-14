@@ -3,4 +3,4 @@
 
 """Local, token-safe helpers for the YNAB public API."""
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"

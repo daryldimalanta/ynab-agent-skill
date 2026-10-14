@@ -17,6 +17,7 @@ from tools.install_skill import LocalPaths
 MUTATIONS = (
     ('validation.audit_mutation_checks', 7), ('validation.audit_new_payee_checks', 4),
     ('validation.audit_transaction_read_checks', 10), ('validation.audit_budget_planning_checks', 7),
+    ('validation.audit_purchase_checks', 8),
 )
 
 
@@ -40,7 +41,7 @@ def mutation_result(output, expected):
 
 def current(report, source_digest, required_mode=None):
     checks = report.get('checks', [])
-    expected = 7 if report.get('mode') == 'full' else 3
+    expected = 3 + len(MUTATIONS) if report.get('mode') == 'full' else 3
     return ((required_mode is None or report.get('mode') == required_mode)
             and report.get('source_digest') == source_digest and report.get('status') == 'passed'
             and len(checks) == expected and all(r.get('passed') and r.get('exit_code') == 0

@@ -11,6 +11,11 @@ from tools.runtime import bootstrap
 ROOT = Path(__file__).absolute().parents[1]
 FORMATTED = (
     "budget_tools/transaction_workflow.py",
+    "budget_tools/purchases.py",
+    "budget_tools/purchase_memos.py",
+    "budget_tools/purchase_workflow.py",
+    "tests/test_purchases.py",
+    "validation/audit_purchase_checks.py",
     "tools/runtime.py",
     "tools/run.py",
     "tools/check_wheel.py",

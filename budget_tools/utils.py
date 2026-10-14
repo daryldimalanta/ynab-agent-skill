@@ -272,6 +272,21 @@ def _draft_public(draft: dict[str, Any]) -> dict[str, Any]:
         "changes": draft.get("changes"),
         "apply_command": f"ynab-agent-skill drafts apply {draft.get('id')} --confirm {draft.get('id')}",
     }
+    if draft.get("workflow") == "purchase_batch":
+        result["purchase_review"] = {
+            "model": draft.get("proposal", {}).get("model"),
+            "remaining_units": draft.get("proposal", {}).get("remaining"),
+            "steps": draft.get("payload", {}).get("steps"),
+            "adoption": draft.get("proposal", {}).get("recovered"),
+            "adoption_evidence": draft.get("proposal", {}).get("adoption_evidence"),
+            "warning": "Review exact amounts, dates, categories and memos. Replacement temporarily duplicates estimates until verified deletion.",
+        }
+        result["progress"] = draft.get("progress", {})
+        result["resume_command"] = f"ynab-agent-skill drafts resume {draft.get('id')} --confirm {draft.get('id')}"
+        if draft.get("operation") == "purchase_adopt":
+            target = draft["proposal"]["recovered"]["pending"]["id"]
+            result["apply_command"] += f" --confirm-adopt {target}"
+            result["resume_command"] += f" --confirm-adopt {target}"
     if draft.get("workflow") == "deletion_restore":
         result["restoration_review"] = {
             "original_transaction": draft.get("before_detail"),

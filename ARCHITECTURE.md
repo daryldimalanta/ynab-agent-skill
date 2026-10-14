@@ -1,6 +1,6 @@
 # Project structure and architecture
 
-`ynab-agent-skill` has two cooperating parts: an agent skill that describes receipt review, monthly budget planning, and transaction deletion/restoration, and a local Python command that validates proposals and performs controlled YNAB operations. The command runs on demand; there is no background service, database server, bundled model, or OCR engine.
+`ynab-agent-skill` has two cooperating parts: an agent skill that describes receipt review, monthly budget planning, transaction deletion/restoration, and online purchase estimates, and a local Python command that validates proposals and performs controlled YNAB operations. The command runs on demand; there is no background service, database server, bundled model, or OCR engine.
 
 This guide maps the current implementation (versioned in `budget_tools/__init__.py`). Start with [README.md](README.md) for installation and everyday use, [the proposal reference](skills/ynab-agent-skill/references/proposal.md) for input JSON, and [VALIDATION.md](VALIDATION.md) for observed test results and remaining work.
 
@@ -19,6 +19,9 @@ ynab-agent-skill/
 │   ├── __init__.py                  Package version
 │   ├── cli.py                       Parser, output and command dispatch
 │   ├── transactions.py              Transaction reads, drafting and comparisons
+│   ├── purchases.py                 Purchase evidence, previews and batch drafting
+│   ├── purchase_memos.py            Portable item/coverage context, 500-character limits
+│   ├── purchase_workflow.py         Shared guarded purchase coordination and recovery
 │   ├── deletion.py                  Transaction deletion drafting, eligibility, and restoration
 │   ├── transaction_workflow.py      Guarded execution and durable recovery
 │   ├── utils.py                     Resolvers and shared helpers
@@ -34,6 +37,7 @@ ynab-agent-skill/
 │   ├── LICENSE.txt                  MIT notice for standalone skill distribution
 │   ├── references/proposal.md       Version-1 proposal schema and example
 │   ├── references/budget-planning.md Monthly read, review, and recovery guidance
+│   ├── references/purchases.md      Online order schemas, correction and fresh-host recovery
 │   ├── references/memos.md          Memo composition guidance
 │   ├── references/long-runs.md      Batch checkpoints and recovery
 │   └── agents/openai.yaml           Optional Codex display metadata and example prompt
@@ -57,6 +61,8 @@ ynab-agent-skill/
 │   ├── audit_new_payee_checks.py
 │   ├── audit_transaction_read_checks.py
 │   ├── mutation_support.py          Fault injection across lookup bindings
+│   ├── audit_purchase_checks.py      Eight exercised purchase safety faults
+│   ├── PURCHASE_ACCEPTANCE_CASES.md  Planned purchase/host interpretation evaluations
 │   ├── audit_budget_planning_checks.py
 │   ├── RECEIPT_ACCEPTANCE_CASES.md   Planned model evaluations, not completed tests
 │   └── BUDGET_ACCEPTANCE_CASES.md    Planned planning evaluations
@@ -222,6 +228,20 @@ flowchart LR
 
 This diagram summarizes the receipt conversion/creation path. Existing matching splits use `receipt_approval` and skip the categorization write. Explicit new creation uses `receipt_create` and a null proposal transaction ID. Generic `draft-create` / `draft-update` use the separate `_finish_verification()` path; generic update rejects combining approval with other changes.
 
+## Online purchase estimates and settlement
+
+`purchases.py` validates evidenced order/payment totals, exact unit amounts, existing categories/payee/account and merchant eligibility. Shipment/delivery hints remain private hypotheses. `purchase_memos.py` renders complete readable order identity, coverage and item rows with an AI-created pending/separate-charge warning. Parent and line limits are 500 characters; overflow blocks. One item is non-split; multiple items keep distinct item rows, including repeated categories. No receipt images, personal defaults or private financial examples are distributed.
+
+`purchase_workflow.execute()` owns parent draft and purchase locks, exact confirmation, expiry, terms, current-state validation and durable progress. Its sealed parent contains model/proposal/step intent and baseline ledger. Child drafts reuse `transaction_workflow.execute()` and its transport, target locks, checkpoints, readback and private deletion history. A context-bound guard prevents direct child execution and checks immutable child intent against the sealed parent. Existing draft seal fields and ordinary receipt workflows are preserved. Confirmation is an operator assertion, not authenticated proof of human approval.
+
+Partial settlement updates/verifies existing actual records, creates/verifies one remainder, then deletes the unchanged eligible old estimate. Approved, cleared, reconciled, imported, matched or transferred estimates cannot be retired through this workflow. Correct native matches keep their record and split rows with only a reviewed parent memo update. Existing actual split rows are immutable through the API; incorrect rows require native correction. Readback journals each known ID and full snapshot. Month/category activity deltas aid review but do not predict exact Available/Ready-to-Assign balances or payment effects.
+
+Private `purchases/<UUID>.json` under the existing application root holds original model/units, coverage, current pending generation, actual snapshots, history and inflight batch ownership. The StateStore uses the existing protected directory/file rules. No independent source checkout or installed host owns a separate business implementation. Complete current memos plus linked actuals permit read-only reconstruction without this ledger; explicit adoption/finalization creates a new reviewed local record and never imports prior approval.
+
+`drafts reconcile` reads uncertain outcomes; `resume` sends only unattempted reviewed steps. Unknown creation IDs require independent unique candidate recovery and GET reconciliation; no amount-only guess or replay. `purchases draft-resume` creates a fresh review after expiry/rejection or positively identified interrupted outcomes, retaining verified remainder records through observation steps. Local cancellation releases only a batch with no attempted children. Batch writes are not atomic: temporary duplicates can remain after interruption, and local locks cannot prevent external YNAB edits or native matching. A changed record stops retirement; no automatic rollback removes actuals.
+
+Commands, proposal shapes, standalone-host recovery and limits are in [the purchase reference](skills/ynab-agent-skill/references/purchases.md). Synthetic HTTP regressions are in [test_purchases.py](tests/test_purchases.py); [purchase fault checks](validation/audit_purchase_checks.py) require passing controls and exercised assertion failures. [Purchase acceptance cases](validation/PURCHASE_ACCEPTANCE_CASES.md) explicitly separate unrun host interpretation/live behavior from offline checks.
+
 ## Data records and recovery
 
 | Record | Produced by | Main contents and purpose |
@@ -286,7 +306,7 @@ This tree describes the implementation; it is not a sample of anyone's private s
 
 Some tests share fixtures across both directories: `FakeClient` lives in `tests/test_budget_tools.py`, and `OfflineCase` / `ReviewClient` live in `validation/test_post_implementation_safety.py`. Keep both directories available when running tests. `validation` works as a Python namespace package without an `__init__.py`.
 
-Run both unittest discovery commands and all four mutation diagnostics in [README.md](README.md#offline-verification). Running only one directory omits coverage. Dated results are in [VALIDATION.md](VALIDATION.md); they do not mean model interpretation cases or live pilots have passed. The receipt and budget acceptance checklists are evaluation plans, not executable test suites.
+Run both unittest discovery commands and all five mutation diagnostics in [README.md](README.md#offline-verification). Running only one directory omits coverage. Dated results are in [VALIDATION.md](VALIDATION.md); they do not mean model interpretation cases or live pilots have passed. The receipt, budget and purchase acceptance checklists are evaluation plans, not executable test suites.
 
 ## Where to make a change
 

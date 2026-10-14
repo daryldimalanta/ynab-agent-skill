@@ -169,6 +169,7 @@ class StateStore:
         self.root = _local_path(root or default_state_root())
         assert_local_storage(self.root)
         self.drafts_dir = self.root / "drafts"
+        self.purchases_dir = self.root / "purchases"
         self.locks_dir = self.root / "locks"
         self.config_path = self.root / "config.json"
         self.audit_path = self.root / "audit.jsonl"
@@ -294,6 +295,40 @@ class StateStore:
                 }
             )
         return drafts
+
+    def purchase_path(self, purchase_id: str) -> Path:
+        # Reuse the existing strict UUID filename contract, never a user path.
+        return self.purchases_dir / self.draft_path(purchase_id).name
+
+    def save_purchase(self, record: dict[str, Any]) -> None:
+        self.ensure()
+        with _directory(self.purchases_dir, create=True, private=True):
+            pass
+        if type(record.get("schema_version")) is not int or record["schema_version"] != 1:
+            raise StateError("Unsupported purchase ledger version")
+        self._atomic_json(self.purchase_path(record["id"]), record)
+
+    def load_purchase(self, purchase_id: str) -> dict[str, Any]:
+        record = self._read_json(self.purchase_path(purchase_id))
+        if record.get("id") != purchase_id or type(record.get("schema_version")) is not int or record["schema_version"] != 1:
+            raise StateError("Invalid purchase ledger identity/version")
+        return record
+
+    def purchase_exists(self, purchase_id: str) -> bool:
+        self.ensure()
+        with _directory(self.purchases_dir, create=True, private=True) as directory:
+            try:
+                _private_file(os.stat(self.purchase_path(purchase_id).name, dir_fd=directory,
+                                      follow_symlinks=False))
+            except FileNotFoundError:
+                return False
+        return True
+
+    def list_purchases(self) -> list[dict[str, Any]]:
+        self.ensure()
+        with _directory(self.purchases_dir, create=True, private=True) as directory:
+            names = sorted(os.listdir(directory))
+        return [self.load_purchase(name[:-5]) for name in names if name.endswith(".json")]
 
     def append_audit(self, record: dict[str, Any]) -> None:
         self.ensure()
